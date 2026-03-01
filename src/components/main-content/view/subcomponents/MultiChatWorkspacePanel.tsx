@@ -1027,20 +1027,24 @@ export default function MultiChatWorkspacePanel({
                         <HeaderLanguageIcon className={`h-3.5 w-3.5 ${languageIconConfig.colorClass}`} />
                       </div>
                     </div>
-                    <div className="min-w-0 text-center">
-                      <div className="text-[11px] text-muted-foreground truncate">{project.fullPath}</div>
-                      {(project.url || project.configuredUrl) && (
-                        <a
-                          href={String(project.url || project.configuredUrl)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[10px] text-primary/70 hover:text-primary truncate block leading-tight"
-                          title={String(project.url || project.configuredUrl)}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {String(project.url || project.configuredUrl)}
-                        </a>
-                      )}
+                    <div className="min-w-0 pl-9 pr-28">
+                      <div className="flex items-center gap-2">
+                        <div className="text-[11px] text-muted-foreground truncate flex-1">
+                          {project.fullPath}
+                        </div>
+                        {(project.url || project.configuredUrl) && (
+                          <a
+                            href={String(project.url || project.configuredUrl)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-primary/70 hover:text-primary truncate leading-tight max-w-[42%]"
+                            title={String(project.url || project.configuredUrl)}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {String(project.url || project.configuredUrl)}
+                          </a>
+                        )}
+                      </div>
                     </div>
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       <button

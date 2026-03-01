@@ -45,6 +45,7 @@ export function useChatProviderState({ selectedProject, selectedSession }: UseCh
   });
 
   const lastProviderRef = useRef(provider);
+  const lastPreferredProviderProjectRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,7 +116,14 @@ export function useChatProviderState({ selectedProject, selectedSession }: UseCh
       return;
     }
 
-    const preferredProvider = providerByProject[selectedProject.name];
+    const projectName = selectedProject.name;
+    if (lastPreferredProviderProjectRef.current === projectName) {
+      return;
+    }
+
+    lastPreferredProviderProjectRef.current = projectName;
+
+    const preferredProvider = providerByProject[projectName];
     if (!preferredProvider || preferredProvider === provider) {
       return;
     }
@@ -129,12 +137,8 @@ export function useChatProviderState({ selectedProject, selectedSession }: UseCh
       return;
     }
 
-    const preferredProvider = providerByProject[selectedProject.name];
-    if (preferredProvider && !selectedSession?.__provider && preferredProvider !== provider) {
-      return;
-    }
-
     if (providerByProject[selectedProject.name] === provider) {
+      localStorage.setItem('selected-provider', provider);
       return;
     }
 
