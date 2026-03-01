@@ -50,3 +50,16 @@ CREATE TABLE IF NOT EXISTS user_credentials (
 CREATE INDEX IF NOT EXISTS idx_user_credentials_user_id ON user_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_credentials_type ON user_credentials(credential_type);
 CREATE INDEX IF NOT EXISTS idx_user_credentials_active ON user_credentials(is_active);
+
+-- User UI preferences table (stores persistent UI/workspace state as JSON values)
+CREATE TABLE IF NOT EXISTS user_ui_preferences (
+    user_id INTEGER NOT NULL,
+    preference_key TEXT NOT NULL,
+    preference_value TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, preference_key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_ui_preferences_user_id ON user_ui_preferences(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_ui_preferences_updated_at ON user_ui_preferences(updated_at);

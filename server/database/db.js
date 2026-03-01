@@ -91,6 +91,19 @@ const runMigrations = () => {
       db.exec('ALTER TABLE users ADD COLUMN has_completed_onboarding BOOLEAN DEFAULT 0');
     }
 
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_ui_preferences (
+        user_id INTEGER NOT NULL,
+        preference_key TEXT NOT NULL,
+        preference_value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, preference_key),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_ui_preferences_user_id ON user_ui_preferences(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_ui_preferences_updated_at ON user_ui_preferences(updated_at);
+    `);
+
     console.log('Database migrations completed successfully');
   } catch (error) {
     console.error('Error running migrations:', error.message);
@@ -348,6 +361,81 @@ const credentialsDb = {
   }
 };
 
+// User UI preferences database operations
+const uiPreferencesDb = {
+  getPreferences: (userId, keys = null) => {
+    try {
+      const normalizedKeys = Array.isArray(keys)
+        ? keys.filter((key) => typeof key === 'string' && key.trim().length > 0)
+        : [];
+
+      let rows;
+      if (normalizedKeys.length > 0) {
+        const placeholders = normalizedKeys.map(() => '?').join(', ');
+        rows = db
+          .prepare(
+            `SELECT preference_key, preference_value
+             FROM user_ui_preferences
+             WHERE user_id = ? AND preference_key IN (${placeholders})`,
+          )
+          .all(userId, ...normalizedKeys);
+      } else {
+        rows = db
+          .prepare(
+            `SELECT preference_key, preference_value
+             FROM user_ui_preferences
+             WHERE user_id = ?`,
+          )
+          .all(userId);
+      }
+
+      return rows.reduce((acc, row) => {
+        try {
+          acc[row.preference_key] = JSON.parse(row.preference_value);
+        } catch {
+          acc[row.preference_key] = row.preference_value;
+        }
+        return acc;
+      }, {});
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  setPreferences: (userId, preferences) => {
+    try {
+      if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) {
+        return;
+      }
+
+      const entries = Object.entries(preferences).filter(
+        ([key, value]) => typeof key === 'string' && key.trim().length > 0 && value !== undefined,
+      );
+
+      if (entries.length === 0) {
+        return;
+      }
+
+      const upsert = db.prepare(`
+        INSERT INTO user_ui_preferences (user_id, preference_key, preference_value, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, preference_key)
+        DO UPDATE SET preference_value = excluded.preference_value, updated_at = CURRENT_TIMESTAMP
+      `);
+
+      const transaction = db.transaction((pairs) => {
+        for (const [key, value] of pairs) {
+          upsert.run(userId, key, JSON.stringify(value));
+        }
+      });
+
+      transaction(entries);
+    } catch (err) {
+      throw err;
+    }
+  },
+};
+
 // Backward compatibility - keep old names pointing to new system
 const githubTokensDb = {
   createGithubToken: (userId, tokenName, githubToken, description = null) => {
@@ -372,6 +460,7 @@ export {
   initializeDatabase,
   userDb,
   apiKeysDb,
+  uiPreferencesDb,
   credentialsDb,
   githubTokensDb // Backward compatibility
 };

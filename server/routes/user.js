@@ -1,5 +1,5 @@
 import express from 'express';
-import { userDb } from '../database/db.js';
+import { uiPreferencesDb, userDb } from '../database/db.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { getSystemGitConfig } from '../utils/gitConfig.js';
 import { exec } from 'child_process';
@@ -7,6 +7,14 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 const router = express.Router();
+const ALLOWED_UI_PREFERENCE_KEYS = new Set([
+  'workspaceSelectedProjectName',
+  'workspaceSelectedSessionId',
+  'workspaceActiveTab',
+  'providerByProject',
+  'multiChatSelectedProjects',
+  'multiChatSelectedSessionsByProject',
+]);
 
 router.get('/git-config', authenticateToken, async (req, res) => {
   try {
@@ -100,6 +108,56 @@ router.get('/onboarding-status', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error checking onboarding status:', error);
     res.status(500).json({ error: 'Failed to check onboarding status' });
+  }
+});
+
+router.get('/ui-preferences', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const rawKeys = typeof req.query.keys === 'string'
+      ? req.query.keys.split(',').map((key) => key.trim()).filter(Boolean)
+      : [];
+    const requestedKeys = rawKeys.filter((key) => ALLOWED_UI_PREFERENCE_KEYS.has(key));
+    const preferences = uiPreferencesDb.getPreferences(userId, requestedKeys.length > 0 ? requestedKeys : null);
+
+    res.json({
+      success: true,
+      preferences,
+    });
+  } catch (error) {
+    console.error('Error loading UI preferences:', error);
+    res.status(500).json({ error: 'Failed to load UI preferences' });
+  }
+});
+
+router.patch('/ui-preferences', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const payload = req.body?.preferences;
+
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return res.status(400).json({ error: 'preferences must be an object' });
+    }
+
+    const filteredPreferences = Object.fromEntries(
+      Object.entries(payload).filter(([key, value]) =>
+        ALLOWED_UI_PREFERENCE_KEYS.has(key) && value !== undefined,
+      ),
+    );
+
+    if (Object.keys(filteredPreferences).length === 0) {
+      return res.status(400).json({ error: 'No valid preference keys provided' });
+    }
+
+    uiPreferencesDb.setPreferences(userId, filteredPreferences);
+
+    res.json({
+      success: true,
+      preferences: uiPreferencesDb.getPreferences(userId, Object.keys(filteredPreferences)),
+    });
+  } catch (error) {
+    console.error('Error saving UI preferences:', error);
+    res.status(500).json({ error: 'Failed to save UI preferences' });
   }
 });
 

@@ -129,7 +129,15 @@ const toCodexPermissionMode = (value: unknown): CodexPermissionMode => {
     return value;
   }
 
-  return 'default';
+  return 'bypassPermissions';
+};
+
+const toGeminiPermissionMode = (value: unknown): GeminiPermissionMode => {
+  if (value === 'auto_edit' || value === 'yolo') {
+    return value;
+  }
+
+  return 'yolo';
 };
 
 const readCodeEditorSettings = (): CodeEditorSettingsState => ({
@@ -204,8 +212,8 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
   const [cursorPermissions, setCursorPermissions] = useState<CursorPermissionsState>(() => (
     createEmptyCursorPermissions()
   ));
-  const [codexPermissionMode, setCodexPermissionMode] = useState<CodexPermissionMode>('default');
-  const [geminiPermissionMode, setGeminiPermissionMode] = useState<GeminiPermissionMode>('default');
+  const [codexPermissionMode, setCodexPermissionMode] = useState<CodexPermissionMode>('bypassPermissions');
+  const [geminiPermissionMode, setGeminiPermissionMode] = useState<GeminiPermissionMode>('yolo');
 
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [cursorMcpServers, setCursorMcpServers] = useState<McpServer[]>([]);
@@ -667,7 +675,7 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
         localStorage.getItem('gemini-settings'),
         {},
       );
-      setGeminiPermissionMode(savedGeminiSettings.permissionMode || 'default');
+      setGeminiPermissionMode(toGeminiPermissionMode(savedGeminiSettings.permissionMode));
 
       await Promise.all([
         fetchMcpServers(),
@@ -678,7 +686,8 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
       console.error('Error loading settings:', error);
       setClaudePermissions(createEmptyClaudePermissions());
       setCursorPermissions(createEmptyCursorPermissions());
-      setCodexPermissionMode('default');
+      setCodexPermissionMode('bypassPermissions');
+      setGeminiPermissionMode('yolo');
       setProjectSortOrder('name');
     }
   }, [fetchCodexMcpServers, fetchCursorMcpServers, fetchMcpServers]);

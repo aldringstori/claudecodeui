@@ -183,6 +183,19 @@ export const api = {
       authenticatedFetch('/api/user/complete-onboarding', {
         method: 'POST',
       }),
+    uiPreferences: (keys = []) => {
+      const params = new URLSearchParams();
+      if (Array.isArray(keys) && keys.length > 0) {
+        params.set('keys', keys.join(','));
+      }
+      const query = params.toString();
+      return authenticatedFetch(`/api/user/ui-preferences${query ? `?${query}` : ''}`);
+    },
+    updateUiPreferences: (preferences) =>
+      authenticatedFetch('/api/user/ui-preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({ preferences }),
+      }),
   },
 
   // Generic GET method for any endpoint

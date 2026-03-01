@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, GripVertical, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, FolderOpen, GripVertical, Plus, Terminal, X } from 'lucide-react';
 import ChatInterface from '../../../chat/view/ChatInterface';
 import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
 import type { SessionLifecycleHandler } from '../../types/types';
+import { authenticatedFetch } from '../../../../utils/api';
+import FileTree from '../../../file-tree/view/FileTree';
+import { useEditorSidebar } from '../../../code-editor/hooks/useEditorSidebar';
+import EditorSidebar from '../../../code-editor/view/EditorSidebar';
+import StandaloneShell from '../../../standalone-shell/view/StandaloneShell';
 
 const MULTI_CHAT_STORAGE_KEY = 'multichat-selected-projects';
 const MULTI_CHAT_GRID_COLUMNS_KEY = 'multichat-grid-columns';
 const STARRED_PROJECTS_STORAGE_KEY = 'starredProjects';
 const CLAUDE_SETTINGS_STORAGE_KEY = 'claude-settings';
+const MULTI_CHAT_SELECTED_PROJECTS_KEY = 'multiChatSelectedProjects';
+const MULTI_CHAT_SELECTED_SESSIONS_KEY = 'multiChatSelectedSessionsByProject';
 
 type ProjectSortOrder = 'name' | 'date';
 type SessionWithProvider = ProjectSession & { __provider: SessionProvider };
@@ -225,6 +232,241 @@ type MultiChatWorkspacePanelProps = {
   externalMessageUpdate: number;
 };
 
+type MultiChatProjectTileView = 'chat' | 'files' | 'shell';
+
+type MultiChatProjectTileProps = {
+  project: Project;
+  selectedSessionId: string | null;
+  onSessionChange: (projectName: string, sessionId: string | null) => void;
+  ws: WebSocket | null;
+  sendMessage: (message: unknown) => void;
+  latestMessage: unknown;
+  onInputFocusChange: (focused: boolean) => void;
+  onSessionActive: SessionLifecycleHandler;
+  onSessionInactive: SessionLifecycleHandler;
+  onSessionProcessing: SessionLifecycleHandler;
+  onSessionNotProcessing: SessionLifecycleHandler;
+  processingSessions: Set<string>;
+  onReplaceTemporarySession: SessionLifecycleHandler;
+  onShowSettings: () => void;
+  autoExpandTools: boolean;
+  showRawParameters: boolean;
+  showThinking: boolean;
+  autoScrollToBottom: boolean;
+  sendByCtrlEnter: boolean;
+  externalMessageUpdate: number;
+};
+
+function MultiChatProjectTile({
+  project,
+  selectedSessionId,
+  onSessionChange,
+  ws,
+  sendMessage,
+  latestMessage,
+  onInputFocusChange,
+  onSessionActive,
+  onSessionInactive,
+  onSessionProcessing,
+  onSessionNotProcessing,
+  processingSessions,
+  onReplaceTemporarySession,
+  onShowSettings,
+  autoExpandTools,
+  showRawParameters,
+  showThinking,
+  autoScrollToBottom,
+  sendByCtrlEnter,
+  externalMessageUpdate,
+}: MultiChatProjectTileProps) {
+  const [view, setView] = useState<MultiChatProjectTileView>('chat');
+
+  const {
+    editingFile,
+    editorWidth,
+    editorExpanded,
+    hasManualWidth,
+    resizeHandleRef,
+    handleFileOpen,
+    handleCloseEditor,
+    handleToggleEditorExpand,
+    handleResizeStart,
+  } = useEditorSidebar({
+    selectedProject: project,
+    isMobile: false,
+    initialWidth: 380,
+  });
+
+  const sessions = useMemo(
+    () => getAllProjectSessions(project),
+    [project],
+  );
+
+  const selectedSession = useMemo(
+    () => (selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) || null : null),
+    [selectedSessionId, sessions],
+  );
+
+  return (
+    <div className="h-full min-h-0 flex">
+      <aside className="w-52 min-w-[180px] border-r border-border/60 bg-muted/15 flex flex-col">
+        <div className="p-2 border-b border-border/50 space-y-2">
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              onClick={() => setView('files')}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
+                view === 'files'
+                  ? 'border-primary/60 bg-primary/10 text-primary'
+                  : 'border-border/70 bg-background text-foreground hover:bg-muted/40'
+              }`}
+              title={`Open ${project.displayName} files`}
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              Files
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('shell')}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
+                view === 'shell'
+                  ? 'border-primary/60 bg-primary/10 text-primary'
+                  : 'border-border/70 bg-background text-foreground hover:bg-muted/40'
+              }`}
+              title={`Open ${project.displayName} shell`}
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              Shell
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              onSessionChange(project.name, null);
+              setView('chat');
+            }}
+            className={`w-full rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              view === 'chat' && !selectedSession
+                ? 'border-primary/60 bg-primary/10 text-primary'
+                : 'border-border/70 bg-background text-foreground hover:bg-muted/40'
+            }`}
+          >
+            New Session
+          </button>
+        </div>
+
+        <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground border-b border-border/40">
+          Chat History ({sessions.length})
+        </div>
+
+        <div className="flex-1 overflow-auto p-1.5 space-y-1">
+          {sessions.length === 0 ? (
+            <div className="px-2 py-3 text-[11px] text-muted-foreground">
+              No sessions yet.
+            </div>
+          ) : (
+            sessions.map((session) => {
+              const isActive = selectedSession?.id === session.id;
+              const providerLabel =
+                session.__provider === 'cursor'
+                  ? 'CURSOR'
+                  : session.__provider === 'codex'
+                    ? 'CODEX'
+                    : session.__provider === 'gemini'
+                      ? 'GEMINI'
+                      : 'CLAUDE';
+
+              return (
+                <button
+                  key={`${project.name}-${session.__provider}-${session.id}`}
+                  type="button"
+                  onClick={() => {
+                    onSessionChange(project.name, session.id);
+                    setView('chat');
+                  }}
+                  className={`w-full rounded-md border px-2 py-1.5 text-left transition-colors ${
+                    isActive
+                      ? 'border-primary/60 bg-primary/10'
+                      : 'border-border/60 bg-background hover:bg-muted/40'
+                  }`}
+                  title={getSessionName(session)}
+                >
+                  <div className="text-[10px] text-muted-foreground font-medium">{providerLabel}</div>
+                  <div className="text-xs text-foreground truncate">{getSessionName(session)}</div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </aside>
+
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {view === 'chat' && (
+          <ChatInterface
+            selectedProject={project}
+            selectedSession={selectedSession}
+            ws={ws}
+            sendMessage={sendMessage}
+            latestMessage={latestMessage as any}
+            onFileOpen={handleFileOpen}
+            onInputFocusChange={onInputFocusChange}
+            onSessionActive={onSessionActive}
+            onSessionInactive={onSessionInactive}
+            onSessionProcessing={onSessionProcessing}
+            onSessionNotProcessing={onSessionNotProcessing}
+            processingSessions={processingSessions}
+            onReplaceTemporarySession={onReplaceTemporarySession}
+            onShowSettings={onShowSettings}
+            autoExpandTools={autoExpandTools}
+            showRawParameters={showRawParameters}
+            showThinking={showThinking}
+            autoScrollToBottom={autoScrollToBottom}
+            sendByCtrlEnter={sendByCtrlEnter}
+            externalMessageUpdate={externalMessageUpdate}
+            onShowAllTasks={null}
+            showKanbanPanel={false}
+            showQuickSettingsPanel={false}
+          />
+        )}
+
+        {view === 'files' && (
+          <div className="h-full w-full flex min-h-0 overflow-hidden">
+            <div className={`flex min-h-0 min-w-0 overflow-hidden ${editorExpanded ? 'hidden' : ''} flex-1`}>
+              <FileTree selectedProject={project} onFileOpen={handleFileOpen} />
+            </div>
+
+            <EditorSidebar
+              editingFile={editingFile}
+              isMobile={false}
+              editorExpanded={editorExpanded}
+              editorWidth={editorWidth}
+              hasManualWidth={hasManualWidth}
+              resizeHandleRef={resizeHandleRef}
+              onResizeStart={handleResizeStart}
+              onCloseEditor={handleCloseEditor}
+              onToggleEditorExpand={handleToggleEditorExpand}
+              projectPath={project.path || project.fullPath}
+              fillSpace
+            />
+          </div>
+        )}
+
+        {view === 'shell' && (
+          <div className="h-full w-full min-h-0">
+            <StandaloneShell
+              project={project}
+              session={selectedSession}
+              showHeader={false}
+              minimal
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function MultiChatWorkspacePanel({
   projects,
   ws,
@@ -253,6 +495,7 @@ export default function MultiChatWorkspacePanel({
   const [gridColumns, setGridColumns] = useState<MultiChatGridColumns>(readGridColumnsPreference);
   const [draggedProjectName, setDraggedProjectName] = useState<string | null>(null);
   const projectTileRefs = useRef<Record<string, HTMLElement | null>>({});
+  const [hasLoadedServerPreferences, setHasLoadedServerPreferences] = useState(false);
 
   useEffect(() => {
     const syncSortPreferences = () => {
@@ -279,6 +522,65 @@ export default function MultiChatWorkspacePanel({
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadServerPreferences = async () => {
+      try {
+        const response = await authenticatedFetch(
+          `/api/user/ui-preferences?keys=${MULTI_CHAT_SELECTED_PROJECTS_KEY},${MULTI_CHAT_SELECTED_SESSIONS_KEY}`,
+        );
+        if (!response.ok) {
+          throw new Error(`Failed to load multi-chat preferences (${response.status})`);
+        }
+
+        const payload = await response.json() as {
+          preferences?: Record<string, unknown>;
+        };
+        const preferences = payload.preferences || {};
+        const projectNames = preferences[MULTI_CHAT_SELECTED_PROJECTS_KEY];
+        const sessionMap = preferences[MULTI_CHAT_SELECTED_SESSIONS_KEY];
+
+        if (!cancelled && Array.isArray(projectNames)) {
+          const normalizedProjectNames = projectNames.filter(
+            (value): value is string => typeof value === 'string' && value.length > 0,
+          );
+
+          if (normalizedProjectNames.length > 0) {
+            setSelectedProjectNames(normalizedProjectNames);
+          }
+        }
+
+        if (!cancelled && sessionMap && typeof sessionMap === 'object' && !Array.isArray(sessionMap)) {
+          const normalizedSessionMap = Object.fromEntries(
+            Object.entries(sessionMap as Record<string, unknown>).filter(
+              ([projectName, sessionId]) =>
+                typeof projectName === 'string' &&
+                projectName.length > 0 &&
+                (typeof sessionId === 'string' || sessionId === null),
+            ),
+          ) as Record<string, string | null>;
+
+          if (Object.keys(normalizedSessionMap).length > 0) {
+            setSelectedSessionIdsByProject(normalizedSessionMap);
+          }
+        }
+      } catch (error) {
+        console.warn('Unable to load multi-chat preferences:', error);
+      } finally {
+        if (!cancelled) {
+          setHasLoadedServerPreferences(true);
+        }
+      }
+    };
+
+    void loadServerPreferences();
+
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -340,6 +642,30 @@ export default function MultiChatWorkspacePanel({
     }
   }, [gridColumns]);
 
+  useEffect(() => {
+    if (!hasLoadedServerPreferences) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void authenticatedFetch('/api/user/ui-preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          preferences: {
+            [MULTI_CHAT_SELECTED_PROJECTS_KEY]: selectedProjectNames,
+            [MULTI_CHAT_SELECTED_SESSIONS_KEY]: selectedSessionIdsByProject,
+          },
+        }),
+      }).catch((error) => {
+        console.warn('Unable to save multi-chat preferences:', error);
+      });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [hasLoadedServerPreferences, selectedProjectNames, selectedSessionIdsByProject]);
+
   const selectedProjects = useMemo(
     () => {
       return selectedProjectNames
@@ -347,6 +673,14 @@ export default function MultiChatWorkspacePanel({
         .filter((project): project is Project => Boolean(project));
     },
     [selectedProjectNames, sortedProjects],
+  );
+  const selectedProjectNameSet = useMemo(
+    () => new Set(selectedProjectNames),
+    [selectedProjectNames],
+  );
+  const availableProjects = useMemo(
+    () => sortedProjects.filter((project) => !selectedProjectNameSet.has(project.name)),
+    [sortedProjects, selectedProjectNameSet],
   );
 
   const gridClass = getGridClassByPreference(gridColumns) || getGridClass(selectedProjects.length);
@@ -463,8 +797,22 @@ export default function MultiChatWorkspacePanel({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setSelectedProjectNames(sortedProjects.map((project) => project.name))}
-              className="rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs text-foreground hover:bg-muted/40"
+              onClick={() =>
+                setSelectedProjectNames((previous) => {
+                  const existing = new Set(previous);
+                  const additions = sortedProjects
+                    .map((project) => project.name)
+                    .filter((projectName) => !existing.has(projectName));
+
+                  if (additions.length === 0) {
+                    return previous;
+                  }
+
+                  return [...previous, ...additions];
+                })
+              }
+              disabled={availableProjects.length === 0}
+              className="rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs text-foreground enabled:hover:bg-muted/40 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Select All
             </button>
@@ -485,9 +833,10 @@ export default function MultiChatWorkspacePanel({
           </div>
 
           <div className="max-h-48 overflow-auto rounded-md border border-border/60 bg-card divide-y divide-border/40">
-            {sortedProjects.map((project) => {
-              const isSelected = selectedProjectNames.includes(project.name);
-              return (
+            {availableProjects.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-muted-foreground">All projects are already open.</div>
+            ) : (
+              availableProjects.map((project) => (
                 <button
                   key={project.name}
                   type="button"
@@ -498,18 +847,10 @@ export default function MultiChatWorkspacePanel({
                     <div className="text-sm text-foreground truncate">{project.displayName}</div>
                     <div className="text-[11px] text-muted-foreground truncate">{project.fullPath}</div>
                   </div>
-                  <div
-                    className={`w-4 h-4 rounded border flex items-center justify-center ${
-                      isSelected
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border bg-background'
-                    }`}
-                  >
-                    {isSelected && <Check className="w-3 h-3" />}
-                  </div>
+                  <div className="text-[11px] font-medium text-primary">Add</div>
                 </button>
-              );
-            })}
+              ))
+            )}
           </div>
         </div>
       )}
@@ -605,111 +946,33 @@ export default function MultiChatWorkspacePanel({
                 </header>
 
                 <div className="flex-1 min-h-0">
-                  {(() => {
-                    const sessions = getAllProjectSessions(project);
-                    const selectedSessionId = selectedSessionIdsByProject[project.name] || null;
-                    const selectedSession = selectedSessionId
-                      ? sessions.find((session) => session.id === selectedSessionId) || null
-                      : null;
-
-                    return (
-                      <div className="h-full min-h-0 flex">
-                        <aside className="w-52 min-w-[180px] border-r border-border/60 bg-muted/15 flex flex-col">
-                          <div className="p-2 border-b border-border/50">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setSelectedSessionIdsByProject((previous) => ({
-                                  ...previous,
-                                  [project.name]: null,
-                                }))
-                              }
-                              className={`w-full rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                                !selectedSession
-                                  ? 'border-primary/60 bg-primary/10 text-primary'
-                                  : 'border-border/70 bg-background text-foreground hover:bg-muted/40'
-                              }`}
-                            >
-                              New Session
-                            </button>
-                          </div>
-
-                          <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground border-b border-border/40">
-                            Chat History ({sessions.length})
-                          </div>
-
-                          <div className="flex-1 overflow-auto p-1.5 space-y-1">
-                            {sessions.length === 0 ? (
-                              <div className="px-2 py-3 text-[11px] text-muted-foreground">
-                                No sessions yet.
-                              </div>
-                            ) : (
-                              sessions.map((session) => {
-                                const isActive = selectedSession?.id === session.id;
-                                const providerLabel =
-                                  session.__provider === 'cursor'
-                                    ? 'CURSOR'
-                                    : session.__provider === 'codex'
-                                      ? 'CODEX'
-                                      : session.__provider === 'gemini'
-                                        ? 'GEMINI'
-                                        : 'CLAUDE';
-
-                                return (
-                                  <button
-                                    key={`${project.name}-${session.__provider}-${session.id}`}
-                                    type="button"
-                                    onClick={() =>
-                                      setSelectedSessionIdsByProject((previous) => ({
-                                        ...previous,
-                                        [project.name]: session.id,
-                                      }))
-                                    }
-                                    className={`w-full rounded-md border px-2 py-1.5 text-left transition-colors ${
-                                      isActive
-                                        ? 'border-primary/60 bg-primary/10'
-                                        : 'border-border/60 bg-background hover:bg-muted/40'
-                                    }`}
-                                    title={getSessionName(session)}
-                                  >
-                                    <div className="text-[10px] text-muted-foreground font-medium">{providerLabel}</div>
-                                    <div className="text-xs text-foreground truncate">{getSessionName(session)}</div>
-                                  </button>
-                                );
-                              })
-                            )}
-                          </div>
-                        </aside>
-
-                        <div className="flex-1 min-h-0">
-                          <ChatInterface
-                            selectedProject={project}
-                            selectedSession={selectedSession}
-                            ws={ws}
-                            sendMessage={sendMessage}
-                            latestMessage={latestMessage as any}
-                            onInputFocusChange={onInputFocusChange}
-                            onSessionActive={onSessionActive}
-                            onSessionInactive={onSessionInactive}
-                            onSessionProcessing={onSessionProcessing}
-                            onSessionNotProcessing={onSessionNotProcessing}
-                            processingSessions={processingSessions}
-                            onReplaceTemporarySession={onReplaceTemporarySession}
-                            onShowSettings={onShowSettings}
-                            autoExpandTools={autoExpandTools}
-                            showRawParameters={showRawParameters}
-                            showThinking={showThinking}
-                            autoScrollToBottom={autoScrollToBottom}
-                            sendByCtrlEnter={sendByCtrlEnter}
-                            externalMessageUpdate={externalMessageUpdate}
-                            onShowAllTasks={null}
-                            showKanbanPanel={false}
-                            showQuickSettingsPanel={false}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  <MultiChatProjectTile
+                    project={project}
+                    selectedSessionId={selectedSessionIdsByProject[project.name] || null}
+                    onSessionChange={(projectName, sessionId) =>
+                      setSelectedSessionIdsByProject((previous) => ({
+                        ...previous,
+                        [projectName]: sessionId,
+                      }))
+                    }
+                    ws={ws}
+                    sendMessage={sendMessage}
+                    latestMessage={latestMessage}
+                    onInputFocusChange={onInputFocusChange}
+                    onSessionActive={onSessionActive}
+                    onSessionInactive={onSessionInactive}
+                    onSessionProcessing={onSessionProcessing}
+                    onSessionNotProcessing={onSessionNotProcessing}
+                    processingSessions={processingSessions}
+                    onReplaceTemporarySession={onReplaceTemporarySession}
+                    onShowSettings={onShowSettings}
+                    autoExpandTools={autoExpandTools}
+                    showRawParameters={showRawParameters}
+                    showThinking={showThinking}
+                    autoScrollToBottom={autoScrollToBottom}
+                    sendByCtrlEnter={sendByCtrlEnter}
+                    externalMessageUpdate={externalMessageUpdate}
+                  />
                 </div>
               </section>
             ))}

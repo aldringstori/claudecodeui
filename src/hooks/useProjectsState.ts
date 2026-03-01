@@ -118,6 +118,30 @@ const readPersistedTab = (): AppTab => {
   return 'chat';
 };
 
+const findProjectSessionById = (project: Project, targetSessionId: string): ProjectSession | null => {
+  const claudeSession = project.sessions?.find((session) => session.id === targetSessionId);
+  if (claudeSession) {
+    return { ...claudeSession, __provider: 'claude' };
+  }
+
+  const cursorSession = project.cursorSessions?.find((session) => session.id === targetSessionId);
+  if (cursorSession) {
+    return { ...cursorSession, __provider: 'cursor' };
+  }
+
+  const codexSession = project.codexSessions?.find((session) => session.id === targetSessionId);
+  if (codexSession) {
+    return { ...codexSession, __provider: 'codex' };
+  }
+
+  const geminiSession = project.geminiSessions?.find((session) => session.id === targetSessionId);
+  if (geminiSession) {
+    return { ...geminiSession, __provider: 'gemini' };
+  }
+
+  return null;
+};
+
 export function useProjectsState({
   sessionId,
   navigate,
@@ -145,6 +169,12 @@ export function useProjectsState({
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState('agents');
   const [externalMessageUpdate, setExternalMessageUpdate] = useState(0);
+  const [workspaceSelectionPreference, setWorkspaceSelectionPreference] = useState<{
+    projectName: string | null;
+    sessionId: string | null;
+  } | null>(null);
+  const [hasLoadedWorkspacePreferences, setHasLoadedWorkspacePreferences] = useState(false);
+  const [hasHydratedWorkspaceSelection, setHasHydratedWorkspaceSelection] = useState(false);
 
   const loadingProgressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -179,12 +209,144 @@ export function useProjectsState({
     void fetchProjects();
   }, [fetchProjects]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadWorkspacePreferences = async () => {
+      try {
+        const response = await api.user.uiPreferences([
+          'workspaceSelectedProjectName',
+          'workspaceSelectedSessionId',
+          'workspaceActiveTab',
+        ]);
+
+        if (!response.ok) {
+          throw new Error(`Failed to load workspace preferences (${response.status})`);
+        }
+
+        const payload = await response.json() as {
+          preferences?: Record<string, unknown>;
+        };
+        const preferences = payload.preferences || {};
+
+        if (cancelled) {
+          return;
+        }
+
+        const savedProjectName =
+          typeof preferences.workspaceSelectedProjectName === 'string'
+            ? preferences.workspaceSelectedProjectName
+            : null;
+        const savedSessionId =
+          typeof preferences.workspaceSelectedSessionId === 'string'
+            ? preferences.workspaceSelectedSessionId
+            : null;
+        const savedTab =
+          typeof preferences.workspaceActiveTab === 'string' && VALID_TABS.has(preferences.workspaceActiveTab)
+            ? (preferences.workspaceActiveTab as AppTab)
+            : null;
+
+        if (savedTab) {
+          setActiveTab(savedTab);
+        }
+
+        setWorkspaceSelectionPreference({
+          projectName: savedProjectName,
+          sessionId: savedSessionId,
+        });
+      } catch (error) {
+        console.warn('Unable to load workspace preferences:', error);
+      } finally {
+        if (!cancelled) {
+          setHasLoadedWorkspacePreferences(true);
+        }
+      }
+    };
+
+    void loadWorkspacePreferences();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Auto-select the project when there is only one, so the user lands on the new session page
   useEffect(() => {
     if (!isLoadingProjects && projects.length === 1 && !selectedProject && !sessionId) {
       setSelectedProject(projects[0]);
     }
   }, [isLoadingProjects, projects, selectedProject, sessionId]);
+
+  useEffect(() => {
+    if (hasHydratedWorkspaceSelection || !hasLoadedWorkspacePreferences) {
+      return;
+    }
+
+    if (sessionId) {
+      setHasHydratedWorkspaceSelection(true);
+      return;
+    }
+
+    if (projects.length === 0) {
+      if (!workspaceSelectionPreference?.projectName) {
+        setHasHydratedWorkspaceSelection(true);
+      }
+      return;
+    }
+
+    const preferredProject = workspaceSelectionPreference?.projectName
+      ? projects.find((project) => project.name === workspaceSelectionPreference.projectName) || null
+      : null;
+
+    const targetProject = preferredProject || selectedProject || null;
+
+    if (preferredProject && selectedProject?.name !== preferredProject.name) {
+      setSelectedProject(preferredProject);
+    }
+
+    if (workspaceSelectionPreference?.sessionId && targetProject) {
+      const preferredSession = findProjectSessionById(targetProject, workspaceSelectionPreference.sessionId);
+      if (preferredSession && selectedSession?.id !== preferredSession.id) {
+        setSelectedSession(preferredSession);
+      }
+    }
+
+    setHasHydratedWorkspaceSelection(true);
+  }, [
+    hasHydratedWorkspaceSelection,
+    hasLoadedWorkspacePreferences,
+    projects,
+    selectedProject,
+    selectedSession?.id,
+    sessionId,
+    workspaceSelectionPreference,
+  ]);
+
+  useEffect(() => {
+    if (!hasLoadedWorkspacePreferences || !hasHydratedWorkspaceSelection) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void api.user.updateUiPreferences({
+        workspaceSelectedProjectName: selectedProject?.name ?? null,
+        workspaceSelectedSessionId: selectedSession?.id ?? null,
+        workspaceActiveTab: activeTab,
+      }).catch((error) => {
+        console.warn('Unable to save workspace preferences:', error);
+      });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    activeTab,
+    hasHydratedWorkspaceSelection,
+    hasLoadedWorkspacePreferences,
+    selectedProject?.name,
+    selectedSession?.id,
+  ]);
 
   useEffect(() => {
     if (!latestMessage) {
@@ -375,7 +537,7 @@ export function useProjectsState({
         setActiveTab('chat');
       }
 
-      const provider = localStorage.getItem('selected-provider') || 'claude';
+      const provider = session.__provider || localStorage.getItem('selected-provider') || 'claude';
       if (provider === 'cursor') {
         sessionStorage.setItem('cursorSessionId', session.id);
       }

@@ -80,6 +80,7 @@ function ChatInterface({
     setPendingPermissionRequests,
     cyclePermissionMode,
   } = useChatProviderState({
+    selectedProject,
     selectedSession,
   });
 

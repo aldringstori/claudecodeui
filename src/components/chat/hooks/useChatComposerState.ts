@@ -605,6 +605,18 @@ export function useChatComposerState({
 
       const toolsSettings = getToolsSettings();
       const resolvedProjectPath = selectedProject.fullPath || selectedProject.path || '';
+      const shouldSkipCursorPermissions =
+        permissionMode === 'acceptEdits' ||
+        permissionMode === 'bypassPermissions' ||
+        Boolean(toolsSettings?.skipPermissions);
+      const geminiPermissionMode =
+        permissionMode === 'bypassPermissions'
+          ? 'yolo'
+          : permissionMode === 'acceptEdits'
+            ? 'auto_edit'
+            : permissionMode === 'plan'
+              ? 'plan'
+              : 'default';
 
       if (provider === 'cursor') {
         sendMessage({
@@ -617,7 +629,7 @@ export function useChatComposerState({
             sessionId: effectiveSessionId,
             resume: Boolean(effectiveSessionId),
             model: cursorModel,
-            skipPermissions: toolsSettings?.skipPermissions || false,
+            skipPermissions: shouldSkipCursorPermissions,
             toolsSettings,
           },
         });
@@ -646,7 +658,7 @@ export function useChatComposerState({
             sessionId: effectiveSessionId,
             resume: Boolean(effectiveSessionId),
             model: geminiModel,
-            permissionMode,
+            permissionMode: geminiPermissionMode,
             toolsSettings,
           },
         });
