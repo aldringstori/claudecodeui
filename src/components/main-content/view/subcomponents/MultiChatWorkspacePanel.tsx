@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, FolderOpen, GripVertical, Plus, Terminal, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Blocks,
+  Braces,
+  Code2,
+  Coffee,
+  FileCode2,
+  FolderOpen,
+  Gem,
+  GripVertical,
+  Hexagon,
+  Plus,
+  Terminal,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import ChatInterface from '../../../chat/view/ChatInterface';
 import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
 import type { SessionLifecycleHandler } from '../../types/types';
@@ -19,6 +35,95 @@ const MULTI_CHAT_SELECTED_SESSIONS_KEY = 'multiChatSelectedSessionsByProject';
 type ProjectSortOrder = 'name' | 'date';
 type SessionWithProvider = ProjectSession & { __provider: SessionProvider };
 type MultiChatGridColumns = 2 | 3;
+type ProjectAccentStyle = {
+  borderClass: string;
+  labelBorderClass: string;
+  labelTextClass: string;
+  lineClass: string;
+  glowClass: string;
+};
+
+type ProjectLanguageIconConfig = {
+  label: string;
+  icon: LucideIcon;
+  colorClass: string;
+};
+
+const PROJECT_ACCENTS: ProjectAccentStyle[] = [
+  {
+    borderClass: 'border-cyan-400/70',
+    labelBorderClass: 'border-cyan-400/70',
+    labelTextClass: 'text-cyan-500 dark:text-cyan-300',
+    lineClass: 'bg-cyan-400/70',
+    glowClass: 'shadow-[0_0_0_1px_rgba(34,211,238,0.2)]',
+  },
+  {
+    borderClass: 'border-fuchsia-400/70',
+    labelBorderClass: 'border-fuchsia-400/70',
+    labelTextClass: 'text-fuchsia-500 dark:text-fuchsia-300',
+    lineClass: 'bg-fuchsia-400/70',
+    glowClass: 'shadow-[0_0_0_1px_rgba(232,121,249,0.2)]',
+  },
+  {
+    borderClass: 'border-emerald-400/70',
+    labelBorderClass: 'border-emerald-400/70',
+    labelTextClass: 'text-emerald-500 dark:text-emerald-300',
+    lineClass: 'bg-emerald-400/70',
+    glowClass: 'shadow-[0_0_0_1px_rgba(52,211,153,0.2)]',
+  },
+  {
+    borderClass: 'border-amber-400/70',
+    labelBorderClass: 'border-amber-400/70',
+    labelTextClass: 'text-amber-600 dark:text-amber-300',
+    lineClass: 'bg-amber-400/70',
+    glowClass: 'shadow-[0_0_0_1px_rgba(251,191,36,0.2)]',
+  },
+  {
+    borderClass: 'border-violet-400/70',
+    labelBorderClass: 'border-violet-400/70',
+    labelTextClass: 'text-violet-500 dark:text-violet-300',
+    lineClass: 'bg-violet-400/70',
+    glowClass: 'shadow-[0_0_0_1px_rgba(167,139,250,0.2)]',
+  },
+  {
+    borderClass: 'border-rose-400/70',
+    labelBorderClass: 'border-rose-400/70',
+    labelTextClass: 'text-rose-500 dark:text-rose-300',
+    lineClass: 'bg-rose-400/70',
+    glowClass: 'shadow-[0_0_0_1px_rgba(251,113,133,0.2)]',
+  },
+];
+
+const LANGUAGE_ICON_BY_NAME: Record<string, ProjectLanguageIconConfig> = {
+  php: { label: 'PHP', icon: Blocks, colorClass: 'text-violet-500 dark:text-violet-300' },
+  typescript: { label: 'TypeScript', icon: FileCode2, colorClass: 'text-sky-500 dark:text-sky-300' },
+  javascript: { label: 'JavaScript', icon: Braces, colorClass: 'text-amber-500 dark:text-amber-300' },
+  python: { label: 'Python', icon: Code2, colorClass: 'text-emerald-500 dark:text-emerald-300' },
+  go: { label: 'Go', icon: Hexagon, colorClass: 'text-cyan-500 dark:text-cyan-300' },
+  rust: { label: 'Rust', icon: Hexagon, colorClass: 'text-orange-500 dark:text-orange-300' },
+  ruby: { label: 'Ruby', icon: Gem, colorClass: 'text-rose-500 dark:text-rose-300' },
+  java: { label: 'Java', icon: Coffee, colorClass: 'text-red-500 dark:text-red-300' },
+  csharp: { label: 'C#', icon: Hexagon, colorClass: 'text-purple-500 dark:text-purple-300' },
+  unknown: { label: 'Code', icon: FileCode2, colorClass: 'text-muted-foreground' },
+};
+
+function getProjectAccent(projectName: string): ProjectAccentStyle {
+  if (!projectName) {
+    return PROJECT_ACCENTS[0];
+  }
+
+  let hash = 0;
+  for (let index = 0; index < projectName.length; index += 1) {
+    hash = (hash * 31 + projectName.charCodeAt(index)) >>> 0;
+  }
+
+  return PROJECT_ACCENTS[hash % PROJECT_ACCENTS.length];
+}
+
+function getProjectLanguageIcon(project: Project): ProjectLanguageIconConfig {
+  const languageKey = String(project.primaryLanguage || '').trim().toLowerCase();
+  return LANGUAGE_ICON_BY_NAME[languageKey] || LANGUAGE_ICON_BY_NAME.unknown;
+}
 
 function readStoredSelection(): string[] {
   try {
@@ -226,6 +331,7 @@ type MultiChatProjectTileView = 'chat' | 'files' | 'shell';
 
 type MultiChatProjectTileProps = {
   project: Project;
+  accentStyle: ProjectAccentStyle;
   selectedSessionId: string | null;
   onSessionChange: (projectName: string, sessionId: string | null) => void;
   ws: WebSocket | null;
@@ -856,116 +962,142 @@ export default function MultiChatWorkspacePanel({
             </div>
           </div>
         ) : (
-          <div className={`grid ${gridClass} gap-3`}>
-            {selectedProjects.map((project, projectIndex) => (
-              <section
-                key={project.name}
-                ref={(element) => {
-                  projectTileRefs.current[project.name] = element;
-                }}
-                onDragOver={(event) => {
-                  if (!draggedProjectName) {
-                    return;
-                  }
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = 'move';
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const sourceProjectName = draggedProjectName || event.dataTransfer.getData('text/plain');
-                  if (sourceProjectName && sourceProjectName !== project.name) {
-                    moveProjectBeforeTarget(sourceProjectName, project.name);
-                  }
-                  setDraggedProjectName(null);
-                }}
-                className={`rounded-lg border bg-card overflow-hidden flex flex-col min-h-0 ${tileHeightClass} ${
-                  draggedProjectName === project.name ? 'border-primary/60' : 'border-border/60'
-                }`}
-              >
-                <header className="relative px-3 py-2 border-b border-border/60 bg-muted/20">
-                  <div className="min-w-0 text-center">
-                    <h4 className="text-sm font-medium text-foreground truncate">{project.displayName}</h4>
-                    <div className="text-[11px] text-muted-foreground truncate">{project.fullPath}</div>
-                  </div>
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    <button
-                      type="button"
-                      draggable
-                      onDragStart={(event) => {
-                        setDraggedProjectName(project.name);
-                        event.dataTransfer.effectAllowed = 'move';
-                        event.dataTransfer.setData('text/plain', project.name);
-                      }}
-                      onDragEnd={() => setDraggedProjectName(null)}
-                      className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-grab active:cursor-grabbing"
-                      aria-label={`Drag ${project.displayName}`}
-                      title={`Drag ${project.displayName}`}
-                    >
-                      <GripVertical className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveProjectByStep(project.name, -1)}
-                      disabled={projectIndex === 0}
-                      className="p-1 rounded-md text-muted-foreground enabled:hover:text-foreground enabled:hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
-                      aria-label={`Move ${project.displayName} up`}
-                      title={`Move ${project.displayName} up`}
-                    >
-                      <ArrowUp className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveProjectByStep(project.name, 1)}
-                      disabled={projectIndex === selectedProjects.length - 1}
-                      className="p-1 rounded-md text-muted-foreground enabled:hover:text-foreground enabled:hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
-                      aria-label={`Move ${project.displayName} down`}
-                      title={`Move ${project.displayName} down`}
-                    >
-                      <ArrowDown className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleProject(project.name)}
-                      className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      aria-label={`Remove ${project.displayName}`}
-                      title={`Remove ${project.displayName}`}
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </header>
+          <div className={`grid ${gridClass} gap-3 pt-4`}>
+            {selectedProjects.map((project, projectIndex) => {
+              const accentStyle = getProjectAccent(project.name);
+              const languageIconConfig = getProjectLanguageIcon(project);
+              const HeaderLanguageIcon = languageIconConfig.icon;
 
-                <div className="flex-1 min-h-0">
-                  <MultiChatProjectTile
-                    project={project}
-                    selectedSessionId={selectedSessionIdsByProject[project.name] || null}
-                    onSessionChange={(projectName, sessionId) =>
-                      setSelectedSessionIdsByProject((previous) => ({
-                        ...previous,
-                        [projectName]: sessionId,
-                      }))
+              return (
+                <section
+                  key={project.name}
+                  ref={(element) => {
+                    projectTileRefs.current[project.name] = element;
+                  }}
+                  onDragOver={(event) => {
+                    if (!draggedProjectName) {
+                      return;
                     }
-                    ws={ws}
-                    sendMessage={sendMessage}
-                    latestMessage={latestMessage}
-                    onInputFocusChange={onInputFocusChange}
-                    onSessionActive={onSessionActive}
-                    onSessionInactive={onSessionInactive}
-                    onSessionProcessing={onSessionProcessing}
-                    onSessionNotProcessing={onSessionNotProcessing}
-                    processingSessions={processingSessions}
-                    onReplaceTemporarySession={onReplaceTemporarySession}
-                    onShowSettings={onShowSettings}
-                    autoExpandTools={autoExpandTools}
-                    showRawParameters={showRawParameters}
-                    showThinking={showThinking}
-                    autoScrollToBottom={autoScrollToBottom}
-                    sendByCtrlEnter={sendByCtrlEnter}
-                    externalMessageUpdate={externalMessageUpdate}
-                  />
-                </div>
-              </section>
-            ))}
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const sourceProjectName = draggedProjectName || event.dataTransfer.getData('text/plain');
+                    if (sourceProjectName && sourceProjectName !== project.name) {
+                      moveProjectBeforeTarget(sourceProjectName, project.name);
+                    }
+                    setDraggedProjectName(null);
+                  }}
+                  className={`relative isolate z-0 rounded-xl border bg-card overflow-visible flex flex-col min-h-0 ${tileHeightClass} ${
+                    draggedProjectName === project.name ? 'border-primary/70' : accentStyle.borderClass
+                  } ${accentStyle.glowClass}`}
+                >
+                  <div className="pointer-events-none absolute top-0 left-1/2 z-[90] w-[84%] -translate-x-1/2 -translate-y-1/2 flex items-center gap-2">
+                    <span className={`relative z-0 h-px flex-1 ${accentStyle.lineClass}`} />
+                    <span
+                      className={`relative z-10 bg-card px-2.5 py-0.5 text-[11px] font-semibold leading-normal ${accentStyle.labelTextClass} max-w-[65%] truncate`}
+                      title={project.displayName}
+                    >
+                      {project.displayName}
+                    </span>
+                    <span className={`relative z-0 h-px flex-1 ${accentStyle.lineClass}`} />
+                  </div>
+
+                  <header className="relative px-3 pt-5 pb-2 border-b border-border/60 bg-muted/20">
+                    <div className="absolute left-2 top-1/2 -translate-y-1/2">
+                      <div
+                        className={`inline-flex items-center justify-center rounded-md border ${accentStyle.labelBorderClass} bg-background/80 p-1`}
+                        title={`Primary language: ${languageIconConfig.label}`}
+                        aria-label={`Primary language: ${languageIconConfig.label}`}
+                      >
+                        <HeaderLanguageIcon className={`h-3.5 w-3.5 ${languageIconConfig.colorClass}`} />
+                      </div>
+                    </div>
+                    <div className="min-w-0 text-center">
+                      <div className="text-[11px] text-muted-foreground truncate">{project.fullPath}</div>
+                    </div>
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) => {
+                          setDraggedProjectName(project.name);
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData('text/plain', project.name);
+                        }}
+                        onDragEnd={() => setDraggedProjectName(null)}
+                        className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-grab active:cursor-grabbing"
+                        aria-label={`Drag ${project.displayName}`}
+                        title={`Drag ${project.displayName}`}
+                      >
+                        <GripVertical className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveProjectByStep(project.name, -1)}
+                        disabled={projectIndex === 0}
+                        className="p-1 rounded-md text-muted-foreground enabled:hover:text-foreground enabled:hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label={`Move ${project.displayName} up`}
+                        title={`Move ${project.displayName} up`}
+                      >
+                        <ArrowUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveProjectByStep(project.name, 1)}
+                        disabled={projectIndex === selectedProjects.length - 1}
+                        className="p-1 rounded-md text-muted-foreground enabled:hover:text-foreground enabled:hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label={`Move ${project.displayName} down`}
+                        title={`Move ${project.displayName} down`}
+                      >
+                        <ArrowDown className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleProject(project.name)}
+                        className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                        aria-label={`Remove ${project.displayName}`}
+                        title={`Remove ${project.displayName}`}
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </header>
+
+                  <div className="flex-1 min-h-0">
+                    <MultiChatProjectTile
+                      project={project}
+                      accentStyle={accentStyle}
+                      selectedSessionId={selectedSessionIdsByProject[project.name] || null}
+                      onSessionChange={(projectName, sessionId) =>
+                        setSelectedSessionIdsByProject((previous) => ({
+                          ...previous,
+                          [projectName]: sessionId,
+                        }))
+                      }
+                      ws={ws}
+                      sendMessage={sendMessage}
+                      latestMessage={latestMessage}
+                      onInputFocusChange={onInputFocusChange}
+                      onSessionActive={onSessionActive}
+                      onSessionInactive={onSessionInactive}
+                      onSessionProcessing={onSessionProcessing}
+                      onSessionNotProcessing={onSessionNotProcessing}
+                      processingSessions={processingSessions}
+                      onReplaceTemporarySession={onReplaceTemporarySession}
+                      onShowSettings={onShowSettings}
+                      autoExpandTools={autoExpandTools}
+                      showRawParameters={showRawParameters}
+                      showThinking={showThinking}
+                      autoScrollToBottom={autoScrollToBottom}
+                      sendByCtrlEnter={sendByCtrlEnter}
+                      externalMessageUpdate={externalMessageUpdate}
+                    />
+                  </div>
+                </section>
+              );
+            })}
           </div>
         )}
       </div>

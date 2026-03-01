@@ -419,6 +419,180 @@ async function hasProjectMarkers(projectPath) {
   return false;
 }
 
+const PRIMARY_LANGUAGE_MARKERS = [
+  // PHP / Laravel
+  { language: 'php', file: 'artisan', weight: 260 },
+  { language: 'php', file: 'composer.json', weight: 200 },
+  { language: 'php', file: '.php-version', weight: 120 },
+  { language: 'php', file: 'phpunit.xml', weight: 110 },
+
+  // Python
+  { language: 'python', file: 'pyproject.toml', weight: 180 },
+  { language: 'python', file: 'requirements.txt', weight: 140 },
+  { language: 'python', file: 'pipfile', weight: 140 },
+  { language: 'python', file: 'setup.py', weight: 120 },
+
+  // Go
+  { language: 'go', file: 'go.mod', weight: 190 },
+  { language: 'go', file: 'go.sum', weight: 90 },
+
+  // Rust
+  { language: 'rust', file: 'cargo.toml', weight: 190 },
+  { language: 'rust', file: 'cargo.lock', weight: 90 },
+
+  // Ruby
+  { language: 'ruby', file: 'gemfile', weight: 180 },
+  { language: 'ruby', file: 'gemfile.lock', weight: 90 },
+
+  // Java
+  { language: 'java', file: 'pom.xml', weight: 170 },
+  { language: 'java', file: 'build.gradle', weight: 150 },
+  { language: 'java', file: 'build.gradle.kts', weight: 150 },
+
+  // C#
+  { language: 'csharp', file: 'global.json', weight: 130 },
+  { language: 'csharp', file: '*.sln', weight: 140 },
+
+  // TypeScript
+  { language: 'typescript', file: 'tsconfig.json', weight: 170 },
+  { language: 'typescript', file: 'tsconfig.base.json', weight: 140 },
+  { language: 'typescript', file: 'deno.json', weight: 130 },
+  { language: 'typescript', file: 'deno.jsonc', weight: 130 },
+
+  // JavaScript (kept lower because package.json is common in non-JS stacks)
+  { language: 'javascript', file: 'package.json', weight: 55 }
+];
+
+const EXTENSION_LANGUAGE_MAP = new Map([
+  ['.php', 'php'],
+  ['.py', 'python'],
+  ['.go', 'go'],
+  ['.rs', 'rust'],
+  ['.rb', 'ruby'],
+  ['.java', 'java'],
+  ['.cs', 'csharp'],
+  ['.ts', 'typescript'],
+  ['.tsx', 'typescript'],
+  ['.mts', 'typescript'],
+  ['.cts', 'typescript'],
+  ['.js', 'javascript'],
+  ['.jsx', 'javascript'],
+  ['.mjs', 'javascript'],
+  ['.cjs', 'javascript']
+]);
+
+const SOURCE_FOLDER_HINTS = [
+  'src',
+  'app',
+  'lib',
+  'server',
+  'backend',
+  'frontend',
+  'client',
+  'api',
+  'cmd',
+  'routes',
+  'config',
+  'database',
+  'bootstrap'
+];
+
+function addLanguageScore(scores, language, value) {
+  scores.set(language, (scores.get(language) || 0) + value);
+}
+
+function applyLanguageScoresFromEntries(entries, scores, weight = 1) {
+  for (const entry of entries) {
+    if (!entry?.isFile?.()) {
+      continue;
+    }
+
+    const extension = path.extname(entry.name || '').toLowerCase();
+    const language = EXTENSION_LANGUAGE_MAP.get(extension);
+    if (language) {
+      addLanguageScore(scores, language, weight);
+    }
+  }
+}
+
+async function detectPrimaryLanguage(projectPath) {
+  if (!projectPath) {
+    return null;
+  }
+
+  try {
+    const topLevelEntries = await fs.readdir(projectPath, { withFileTypes: true });
+    const fileNameSet = new Set(
+      topLevelEntries
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name.toLowerCase())
+    );
+
+    const scores = new Map();
+
+    for (const marker of PRIMARY_LANGUAGE_MARKERS) {
+      if (marker.file === '*.sln') {
+        const hasSlnFile = [...fileNameSet].some((fileName) => fileName.endsWith('.sln'));
+        if (hasSlnFile) {
+          addLanguageScore(scores, marker.language, marker.weight);
+        }
+        continue;
+      }
+
+      if (fileNameSet.has(marker.file)) {
+        addLanguageScore(scores, marker.language, marker.weight);
+      }
+    }
+
+    applyLanguageScoresFromEntries(topLevelEntries, scores, 5);
+
+    for (const directoryName of SOURCE_FOLDER_HINTS) {
+      const directory = topLevelEntries.find(
+        (entry) => entry.isDirectory() && entry.name.toLowerCase() === directoryName
+      );
+      if (!directory) {
+        continue;
+      }
+
+      try {
+        const nestedEntries = await fs.readdir(path.join(projectPath, directory.name), { withFileTypes: true });
+        applyLanguageScoresFromEntries(nestedEntries.slice(0, 300), scores, 1);
+      } catch {
+        // Ignore unreadable folders and continue scoring from available hints.
+      }
+    }
+
+    const ranked = [...scores.entries()].sort((a, b) => {
+      if (b[1] !== a[1]) {
+        return b[1] - a[1];
+      }
+      return a[0].localeCompare(b[0]);
+    });
+
+    return ranked[0]?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function annotateProjectsWithPrimaryLanguage(projects) {
+  if (!Array.isArray(projects) || projects.length === 0) {
+    return;
+  }
+
+  await Promise.all(projects.map(async (project) => {
+    const projectPath = project.fullPath || project.path;
+    if (!projectPath) {
+      return;
+    }
+
+    const primaryLanguage = await detectPrimaryLanguage(projectPath);
+    if (primaryLanguage) {
+      project.primaryLanguage = primaryLanguage;
+    }
+  }));
+}
+
 function parsePortNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     return Math.floor(value);
@@ -1508,6 +1682,7 @@ async function getProjects(progressCallback = null) {
   }
 
   const finalProjects = ensureUniqueDisplayNames(dedupeProjectsByPath(projects));
+  await annotateProjectsWithPrimaryLanguage(finalProjects);
   await enrichProjectsWithAccessUrls(finalProjects);
   return finalProjects;
 }
