@@ -115,4 +115,6 @@ export interface ChatInterfaceProps {
   externalMessageUpdate?: number;
   onTaskClick?: (...args: unknown[]) => void;
   onShowAllTasks?: (() => void) | null;
+  showKanbanPanel?: boolean;
+  showQuickSettingsPanel?: boolean;
 }

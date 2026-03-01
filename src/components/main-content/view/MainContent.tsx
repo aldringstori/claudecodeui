@@ -10,6 +10,7 @@ import MainContentHeader from './subcomponents/MainContentHeader';
 import MainContentStateView from './subcomponents/MainContentStateView';
 import TaskMasterPanel from './subcomponents/TaskMasterPanel';
 import ProjectsDashboardPanel from './subcomponents/ProjectsDashboardPanel';
+import MultiChatWorkspacePanel from './subcomponents/MultiChatWorkspacePanel';
 import type { MainContentProps } from '../types/types';
 
 import { useTaskMaster } from '../../../contexts/TaskMasterContext';
@@ -59,6 +60,7 @@ function MainContent({
   const { currentProject, setCurrentProject } = useTaskMaster() as TaskMasterContextValue;
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings() as TasksSettingsContextValue;
   const isDashboardView = activeTab === 'dashboard';
+  const isMultiChatView = activeTab === 'multichat';
 
   const shouldShowTasksTab = Boolean(tasksEnabled && isTaskMasterInstalled);
 
@@ -93,7 +95,7 @@ function MainContent({
     return <MainContentStateView mode="loading" isMobile={isMobile} onMenuClick={onMenuClick} />;
   }
 
-  if (!selectedProject && !isDashboardView) {
+  if (!selectedProject && !isDashboardView && !isMultiChatView) {
     return <MainContentStateView mode="empty" isMobile={isMobile} onMenuClick={onMenuClick} />;
   }
 
@@ -107,6 +109,7 @@ function MainContent({
         shouldShowTasksTab={shouldShowTasksTab}
         isMobile={isMobile}
         onMenuClick={onMenuClick}
+        showMenuButton={!isMultiChatView}
       />
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
@@ -117,15 +120,13 @@ function MainContent({
             </div>
           )}
 
-          <div className={`h-full ${activeTab === 'chat' ? 'block' : 'hidden'}`}>
-            <ErrorBoundary showDetails>
-              <ChatInterface
-                selectedProject={selectedProject}
-                selectedSession={selectedSession}
+          {isMultiChatView && (
+            <div className="h-full overflow-hidden">
+              <MultiChatWorkspacePanel
+                projects={projects}
                 ws={ws}
                 sendMessage={sendMessage}
                 latestMessage={latestMessage}
-                onFileOpen={handleFileOpen}
                 onInputFocusChange={onInputFocusChange}
                 onSessionActive={onSessionActive}
                 onSessionInactive={onSessionInactive}
@@ -133,7 +134,6 @@ function MainContent({
                 onSessionNotProcessing={onSessionNotProcessing}
                 processingSessions={processingSessions}
                 onReplaceTemporarySession={onReplaceTemporarySession}
-                onNavigateToSession={onNavigateToSession}
                 onShowSettings={onShowSettings}
                 autoExpandTools={autoExpandTools}
                 showRawParameters={showRawParameters}
@@ -141,10 +141,40 @@ function MainContent({
                 autoScrollToBottom={autoScrollToBottom}
                 sendByCtrlEnter={sendByCtrlEnter}
                 externalMessageUpdate={externalMessageUpdate}
-                onShowAllTasks={tasksEnabled ? () => setActiveTab('tasks') : null}
               />
-            </ErrorBoundary>
-          </div>
+            </div>
+          )}
+
+          {!isMultiChatView && (
+            <div className={`h-full ${activeTab === 'chat' ? 'block' : 'hidden'}`}>
+              <ErrorBoundary showDetails>
+                <ChatInterface
+                  selectedProject={selectedProject}
+                  selectedSession={selectedSession}
+                  ws={ws}
+                  sendMessage={sendMessage}
+                  latestMessage={latestMessage}
+                  onFileOpen={handleFileOpen}
+                  onInputFocusChange={onInputFocusChange}
+                  onSessionActive={onSessionActive}
+                  onSessionInactive={onSessionInactive}
+                  onSessionProcessing={onSessionProcessing}
+                  onSessionNotProcessing={onSessionNotProcessing}
+                  processingSessions={processingSessions}
+                  onReplaceTemporarySession={onReplaceTemporarySession}
+                  onNavigateToSession={onNavigateToSession}
+                  onShowSettings={onShowSettings}
+                  autoExpandTools={autoExpandTools}
+                  showRawParameters={showRawParameters}
+                  showThinking={showThinking}
+                  autoScrollToBottom={autoScrollToBottom}
+                  sendByCtrlEnter={sendByCtrlEnter}
+                  externalMessageUpdate={externalMessageUpdate}
+                  onShowAllTasks={tasksEnabled ? () => setActiveTab('tasks') : null}
+                />
+              </ErrorBoundary>
+            </div>
+          )}
 
           {selectedProject && activeTab === 'files' && (
             <div className="h-full overflow-hidden">
@@ -169,7 +199,7 @@ function MainContent({
           <div className={`h-full overflow-hidden ${activeTab === 'preview' ? 'block' : 'hidden'}`} />
         </div>
 
-        {selectedProject && !isDashboardView && (
+        {selectedProject && !isDashboardView && !isMultiChatView && (
           <EditorSidebar
             editingFile={editingFile}
             isMobile={isMobile}

@@ -104,7 +104,7 @@ const isUpdateAdditive = (
   );
 };
 
-const VALID_TABS: Set<string> = new Set(['dashboard', 'chat', 'files', 'shell', 'git', 'tasks', 'preview']);
+const VALID_TABS: Set<string> = new Set(['dashboard', 'multichat', 'chat', 'files', 'shell', 'git', 'tasks', 'preview']);
 
 const readPersistedTab = (): AppTab => {
   try {

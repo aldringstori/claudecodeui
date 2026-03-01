@@ -1,7 +1,6 @@
 import React from 'react';
-import { LayoutDashboard, MessageSquare, Folder, Terminal, GitBranch, ClipboardCheck } from 'lucide-react';
+import { LayoutDashboard, Columns2, MessageSquare, Folder, Terminal, GitBranch, ClipboardCheck } from 'lucide-react';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
-import { useTaskMaster } from '../contexts/TaskMasterContext';
 
 function MobileNav({ activeTab, setActiveTab, isInputFocused }) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
@@ -13,6 +12,12 @@ function MobileNav({ activeTab, setActiveTab, isInputFocused }) {
       icon: LayoutDashboard,
       label: 'Dashboard',
       onClick: () => setActiveTab('dashboard')
+    },
+    {
+      id: 'multichat',
+      icon: Columns2,
+      label: 'Multi Chat',
+      onClick: () => setActiveTab('multichat')
     },
     {
       id: 'chat',

@@ -52,6 +52,8 @@ export default function AppContent() {
     activeSessions,
   });
 
+  const isMultiChatView = activeTab === 'multichat';
+
   useEffect(() => {
     window.refreshProjects = fetchProjects;
 
@@ -72,13 +74,19 @@ export default function AppContent() {
     };
   }, [openSettings]);
 
+  useEffect(() => {
+    if (isMultiChatView && sidebarOpen) {
+      setSidebarOpen(false);
+    }
+  }, [isMultiChatView, sidebarOpen, setSidebarOpen]);
+
   return (
     <div className="fixed inset-0 flex bg-background">
-      {!isMobile ? (
+      {!isMobile && !isMultiChatView ? (
         <div className="h-full flex-shrink-0 border-r border-border/50">
           <Sidebar {...sidebarSharedProps} />
         </div>
-      ) : (
+      ) : !isMultiChatView ? (
         <div
           className={`fixed inset-0 z-50 flex transition-all duration-150 ease-out ${sidebarOpen ? 'opacity-100 visible' : 'opacity-0 invisible'
             }`}
@@ -105,7 +113,7 @@ export default function AppContent() {
             <Sidebar {...sidebarSharedProps} />
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className={`flex-1 flex flex-col min-w-0 ${isMobile ? 'pb-mobile-nav' : ''}`}>
         <MainContent

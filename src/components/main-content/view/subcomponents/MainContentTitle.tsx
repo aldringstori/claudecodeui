@@ -14,6 +14,10 @@ function getTabTitle(activeTab: AppTab, shouldShowTasksTab: boolean, t: (key: st
     return t('tabs.dashboard');
   }
 
+  if (activeTab === 'multichat') {
+    return t('tabs.multichat');
+  }
+
   if (activeTab === 'files') {
     return t('mainContent.projectFiles');
   }

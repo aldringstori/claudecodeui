@@ -19,6 +19,7 @@
   },
   "tabs": {
     "dashboard": "Dashboard",
+    "multichat": "マルチチャット",
     "chat": "チャット",
     "shell": "シェル",
     "files": "ファイル",

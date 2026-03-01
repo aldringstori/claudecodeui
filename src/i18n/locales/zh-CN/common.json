@@ -19,6 +19,7 @@
   },
   "tabs": {
     "dashboard": "仪表盘",
+    "multichat": "多聊天",
     "chat": "聊天",
     "shell": "终端",
     "files": "文件",

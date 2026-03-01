@@ -41,6 +41,8 @@ function ChatInterface({
   sendByCtrlEnter,
   externalMessageUpdate,
   onShowAllTasks,
+  showKanbanPanel = true,
+  showQuickSettingsPanel = true,
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
   const { t } = useTranslation('chat');
@@ -428,7 +430,7 @@ function ChatInterface({
           />
         </div>
 
-        {tasksEnabled && isTaskMasterInstalled && selectedProject && (
+        {showKanbanPanel && tasksEnabled && isTaskMasterInstalled && selectedProject && (
           <ProjectKanbanAssistantPanel
             tasks={tasks as Array<Record<string, unknown>>}
             onCreateTaskWithPrompt={handleCreateTaskWithPrompt}
@@ -438,7 +440,7 @@ function ChatInterface({
         )}
       </div>
 
-      <QuickSettingsPanel />
+      {showQuickSettingsPanel && <QuickSettingsPanel />}
     </>
   );
 }

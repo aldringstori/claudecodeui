@@ -135,7 +135,7 @@ export function useChatRealtimeHandlers({
         ? (latestMessage.data as Record<string, any>)
         : null;
 
-    const globalMessageTypes = ['projects_updated', 'taskmaster-project-updated', 'session-created'];
+    const globalMessageTypes = ['projects_updated', 'taskmaster-project-updated'];
     const isGlobalMessage = globalMessageTypes.includes(String(latestMessage.type));
     const lifecycleMessageTypes = new Set([
       'claude-complete',
@@ -166,11 +166,16 @@ export function useChatRealtimeHandlers({
         ? rawStructuredData?.session_id
         : null;
 
+    const isSessionCreatedForPendingView =
+      latestMessage.type === 'session-created' &&
+      Boolean(pendingViewSessionRef.current && !pendingViewSessionRef.current.sessionId);
+
     const activeViewSessionId =
       selectedSession?.id || currentSessionId || pendingViewSessionRef.current?.sessionId || null;
     const isSystemInitForView =
       systemInitSessionId && (!activeViewSessionId || systemInitSessionId === activeViewSessionId);
-    const shouldBypassSessionFilter = isGlobalMessage || Boolean(isSystemInitForView);
+    const shouldBypassSessionFilter =
+      isGlobalMessage || Boolean(isSystemInitForView) || isSessionCreatedForPendingView;
     const isUnscopedError =
       !latestMessage.sessionId &&
       pendingViewSessionRef.current &&
