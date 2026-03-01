@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Folder, Terminal, GitBranch, ClipboardCheck } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Folder, Terminal, GitBranch, ClipboardCheck } from 'lucide-react';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
 import { useTaskMaster } from '../contexts/TaskMasterContext';
 
@@ -8,6 +8,12 @@ function MobileNav({ activeTab, setActiveTab, isInputFocused }) {
   const shouldShowTasksTab = Boolean(tasksEnabled && isTaskMasterInstalled);
 
   const navItems = [
+    {
+      id: 'dashboard',
+      icon: LayoutDashboard,
+      label: 'Dashboard',
+      onClick: () => setActiveTab('dashboard')
+    },
     {
       id: 'chat',
       icon: MessageSquare,

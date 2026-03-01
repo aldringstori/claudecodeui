@@ -277,13 +277,13 @@ export default function ChatComposer({
 
         <div
           {...getRootProps()}
-          className={`relative bg-card/80 backdrop-blur-sm rounded-2xl shadow-sm border border-border/50 focus-within:shadow-md focus-within:border-primary/30 focus-within:ring-1 focus-within:ring-primary/15 transition-all duration-200 overflow-hidden ${
+          className={`relative bg-card/60 backdrop-blur-xl rounded-2xl shadow-xl shadow-black/20 border border-border/40 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all duration-300 overflow-hidden ${
             isTextareaExpanded ? 'chat-input-expanded' : ''
           }`}
         >
           <input {...getInputProps()} />
           <div ref={inputHighlightRef} aria-hidden="true" className="absolute inset-0 pointer-events-none overflow-hidden rounded-2xl">
-            <div className="chat-input-placeholder block w-full pl-12 pr-20 sm:pr-40 py-1.5 sm:py-4 text-transparent text-base leading-6 whitespace-pre-wrap break-words">
+            <div className="chat-input-placeholder block w-full pl-14 pr-24 sm:pr-48 py-3 sm:py-5 text-transparent text-base leading-relaxed whitespace-pre-wrap break-words">
               {renderInputWithMentions(input)}
             </div>
           </div>
@@ -302,29 +302,25 @@ export default function ChatComposer({
               onInput={onTextareaInput}
               placeholder={placeholder}
               disabled={isLoading}
-              className="chat-input-placeholder block w-full pl-12 pr-20 sm:pr-40 py-1.5 sm:py-4 bg-transparent rounded-2xl focus:outline-none text-foreground placeholder-muted-foreground/50 disabled:opacity-50 resize-none min-h-[50px] sm:min-h-[80px] max-h-[40vh] sm:max-h-[300px] overflow-y-auto text-base leading-6 transition-all duration-200"
-              style={{ height: '50px' }}
+              className="chat-input-placeholder block w-full pl-14 pr-24 sm:pr-48 py-3 sm:py-5 bg-transparent rounded-2xl focus:outline-none text-foreground placeholder-muted-foreground/30 disabled:opacity-50 resize-none min-h-[56px] sm:min-h-[88px] max-h-[40vh] sm:max-h-[350px] overflow-y-auto text-base leading-relaxed transition-all duration-300"
+              style={{ height: '56px' }}
             />
 
             <button
               type="button"
               onClick={openImagePicker}
-              className="absolute left-2 top-1/2 transform -translate-y-1/2 p-2 hover:bg-accent/60 rounded-xl transition-colors"
+              className="absolute left-3 top-[28px] transform -translate-y-1/2 p-2.5 hover:bg-muted/50 rounded-xl transition-all duration-200"
               title={t('input.attachImages')}
             >
-              <svg className="w-5 h-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-muted-foreground/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeWidth={2}
+                  strokeWidth={2.2}
                   d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
                 />
               </svg>
             </button>
-
-            <div className="absolute right-16 sm:right-16 top-1/2 transform -translate-y-1/2" style={{ display: 'none' }}>
-              <MicButton onTranscript={onTranscript} className="w-10 h-10 sm:w-10 sm:h-10" />
-            </div>
 
             <button
               type="submit"
@@ -337,15 +333,15 @@ export default function ChatComposer({
                 event.preventDefault();
                 onSubmit(event);
               }}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 w-10 h-10 sm:w-11 sm:h-11 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed rounded-xl flex items-center justify-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-1 focus:ring-offset-background"
+              className="absolute right-3 top-[28px] transform -translate-y-1/2 w-11 h-11 sm:w-12 sm:h-12 bg-primary hover:bg-primary/90 text-primary-foreground disabled:bg-muted/40 disabled:text-muted-foreground/40 disabled:cursor-not-allowed rounded-xl flex items-center justify-center shadow-lg shadow-primary/20 transition-all duration-300 active:scale-95 focus:outline-none focus:ring-4 focus:ring-primary/20"
             >
-              <svg className="w-4 h-4 sm:w-[18px] sm:h-[18px] text-primary-foreground transform rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              <svg className="w-5 h-5 sm:w-6 sm:h-6 transform rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
             </button>
 
             <div
-              className={`absolute bottom-1 left-12 right-14 sm:right-40 text-xs text-muted-foreground/50 pointer-events-none hidden sm:block transition-opacity duration-200 ${
+              className={`absolute bottom-2 right-24 sm:right-48 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/30 pointer-events-none hidden sm:block transition-opacity duration-300 ${
                 input.trim() ? 'opacity-0' : 'opacity-100'
               }`}
             >

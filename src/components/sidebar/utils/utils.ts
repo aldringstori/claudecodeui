@@ -142,6 +142,19 @@ export const getProjectLastActivity = (
   }, new Date(0));
 };
 
+const getProjectSessionCount = (
+  project: Project,
+  additionalSessions: AdditionalSessionsByProject,
+): number => {
+  const loadedClaudeCount = (project.sessions?.length || 0) + (additionalSessions[project.name]?.length || 0);
+  const totalClaudeCount = Math.max(project.sessionMeta?.total || 0, loadedClaudeCount);
+
+  return totalClaudeCount +
+    (project.cursorSessions?.length || 0) +
+    (project.codexSessions?.length || 0) +
+    (project.geminiSessions?.length || 0);
+};
+
 export const sortProjects = (
   projects: Project[],
   projectSortOrder: ProjectSortOrder,
@@ -154,12 +167,19 @@ export const sortProjects = (
     const aStarred = starredProjects.has(projectA.name);
     const bStarred = starredProjects.has(projectB.name);
 
+    // Favorites always come first regardless of session count or sort mode.
     if (aStarred && !bStarred) {
       return -1;
     }
 
     if (!aStarred && bStarred) {
       return 1;
+    }
+
+    const sessionCountDelta =
+      getProjectSessionCount(projectB, additionalSessions) - getProjectSessionCount(projectA, additionalSessions);
+    if (sessionCountDelta !== 0) {
+      return sessionCountDelta;
     }
 
     if (projectSortOrder === 'date') {

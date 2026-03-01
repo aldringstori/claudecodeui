@@ -1,4 +1,4 @@
-import { FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
+import { FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose, LayoutDashboard } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
@@ -13,6 +13,7 @@ type SidebarHeaderProps = {
   onSearchFilterChange: (value: string) => void;
   onClearSearchFilter: () => void;
   onRefresh: () => void;
+  onOpenDashboard: () => void;
   isRefreshing: boolean;
   onCreateProject: () => void;
   onCollapseSidebar: () => void;
@@ -28,6 +29,7 @@ export default function SidebarHeader({
   onSearchFilterChange,
   onClearSearchFilter,
   onRefresh,
+  onOpenDashboard,
   isRefreshing,
   onCreateProject,
   onCollapseSidebar,
@@ -35,12 +37,10 @@ export default function SidebarHeader({
 }: SidebarHeaderProps) {
   const LogoBlock = () => (
     <div className="flex items-center gap-2.5 min-w-0">
-      <div className="w-7 h-7 bg-primary/90 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0">
-        <svg className="w-3.5 h-3.5 text-primary-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
+      <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-primary/20 flex-shrink-0">
+        <span className="text-primary-foreground font-bold text-xs tracking-tighter">CC</span>
       </div>
-      <h1 className="text-sm font-semibold text-foreground tracking-tight truncate">{t('app.title')}</h1>
+      <h1 className="text-sm font-bold text-foreground tracking-tight truncate uppercase opacity-90">{t('app.title')}</h1>
     </div>
   );
 
@@ -78,6 +78,15 @@ export default function SidebarHeader({
                   isRefreshing ? 'animate-spin' : ''
                 }`}
               />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground hover:bg-accent/80 rounded-lg"
+              onClick={onOpenDashboard}
+              title={t('common:tabs.dashboard')}
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
             </Button>
             <Button
               variant="ghost"
@@ -121,6 +130,16 @@ export default function SidebarHeader({
             )}
           </div>
         )}
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-2 w-full h-8 justify-start text-xs rounded-lg border-border/60"
+          onClick={onOpenDashboard}
+        >
+          <LayoutDashboard className="w-3.5 h-3.5 mr-1.5" />
+          {t('common:tabs.dashboard')}
+        </Button>
       </div>
 
       {/* Desktop divider */}
@@ -153,6 +172,12 @@ export default function SidebarHeader({
               <RefreshCw className={`w-4 h-4 text-muted-foreground ${isRefreshing ? 'animate-spin' : ''}`} />
             </button>
             <button
+              className="w-8 h-8 rounded-lg bg-muted/50 flex items-center justify-center active:scale-95 transition-all"
+              onClick={onOpenDashboard}
+            >
+              <LayoutDashboard className="w-4 h-4 text-muted-foreground" />
+            </button>
+            <button
               className="w-8 h-8 rounded-lg bg-primary/90 text-primary-foreground flex items-center justify-center active:scale-95 transition-all"
               onClick={onCreateProject}
             >
@@ -182,6 +207,14 @@ export default function SidebarHeader({
             )}
           </div>
         )}
+
+        <button
+          className="mt-2.5 w-full h-9 rounded-lg border border-border/60 bg-background text-foreground text-sm font-medium flex items-center justify-center gap-2 active:scale-[0.99] transition-all"
+          onClick={onOpenDashboard}
+        >
+          <LayoutDashboard className="w-4 h-4" />
+          {t('common:tabs.dashboard')}
+        </button>
       </div>
 
       {/* Mobile divider */}

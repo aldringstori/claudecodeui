@@ -18,6 +18,7 @@
     "browse": "参照"
   },
   "tabs": {
+    "dashboard": "Dashboard",
     "chat": "チャット",
     "shell": "シェル",
     "files": "ファイル",
@@ -93,7 +94,8 @@
     "createProjectDesktop": "サイドバーのフォルダアイコンをクリックして新しいプロジェクトを作成できます",
     "newSession": "新しいセッション",
     "untitledSession": "無題のセッション",
-    "projectFiles": "プロジェクトファイル"
+    "projectFiles": "プロジェクトファイル",
+    "allProjects": "すべてのプロジェクト"
   },
   "fileTree": {
     "loading": "ファイルを読み込んでいます...",

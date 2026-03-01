@@ -1,4 +1,4 @@
-import { MessageSquare, Terminal, Folder, GitBranch, ClipboardCheck, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Terminal, Folder, GitBranch, ClipboardCheck, type LucideIcon } from 'lucide-react';
 import Tooltip from '../../../Tooltip';
 import type { AppTab } from '../../../../types/app';
 import type { Dispatch, SetStateAction } from 'react';
@@ -17,6 +17,7 @@ type TabDefinition = {
 };
 
 const BASE_TABS: TabDefinition[] = [
+  { id: 'dashboard', labelKey: 'tabs.dashboard', icon: LayoutDashboard },
   { id: 'chat', labelKey: 'tabs.chat', icon: MessageSquare },
   { id: 'shell', labelKey: 'tabs.shell', icon: Terminal },
   { id: 'files', labelKey: 'tabs.files', icon: Folder },

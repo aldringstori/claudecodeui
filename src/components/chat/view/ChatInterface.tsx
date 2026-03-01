@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import QuickSettingsPanel from '../../QuickSettingsPanel';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
+import { useTaskMaster } from '../../../contexts/TaskMasterContext';
 import { useTranslation } from 'react-i18next';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
+import ProjectKanbanAssistantPanel from './subcomponents/ProjectKanbanAssistantPanel';
 import type { ChatInterfaceProps } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
@@ -42,6 +44,11 @@ function ChatInterface({
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
   const { t } = useTranslation('chat');
+  const { tasks = [], isLoadingTasks } = useTaskMaster() as {
+    tasks?: Array<Record<string, unknown>>;
+    isLoadingTasks?: boolean;
+  };
+  const [isSubmittingTaskPrompt, setIsSubmittingTaskPrompt] = useState(false);
 
   const streamBufferRef = useRef('');
   const streamTimerRef = useRef<number | null>(null);
@@ -166,6 +173,7 @@ function ChatInterface({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
+    submitProgrammaticPrompt,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -197,6 +205,33 @@ function ChatInterface({
     setIsUserScrolledUp,
     setPendingPermissionRequests,
   });
+
+  const handleCreateTaskWithPrompt = useCallback(
+    async (taskText: string) => {
+      if (!selectedProject) {
+        return false;
+      }
+
+      const normalizedTask = taskText.trim();
+      if (!normalizedTask) {
+        return false;
+      }
+
+      const prompt = [
+        `Create a new TaskMaster task for project "${selectedProject.displayName}".`,
+        `Task request: ${normalizedTask}`,
+        'Return a short confirmation with the created task ID.',
+      ].join('\n');
+
+      setIsSubmittingTaskPrompt(true);
+      try {
+        return await submitProgrammaticPrompt(prompt);
+      } finally {
+        setIsSubmittingTaskPrompt(false);
+      }
+    },
+    [selectedProject, submitProgrammaticPrompt],
+  );
 
   useChatRealtimeHandlers({
     latestMessage,
@@ -274,122 +309,133 @@ function ChatInterface({
 
   return (
     <>
-      <div className="h-full flex flex-col">
-        <ChatMessagesPane
-          scrollContainerRef={scrollContainerRef}
-          onWheel={handleScroll}
-          onTouchMove={handleScroll}
-          isLoadingSessionMessages={isLoadingSessionMessages}
-          chatMessages={chatMessages}
-          selectedSession={selectedSession}
-          currentSessionId={currentSessionId}
-          provider={provider}
-          setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
-          textareaRef={textareaRef}
-          claudeModel={claudeModel}
-          setClaudeModel={setClaudeModel}
-          cursorModel={cursorModel}
-          setCursorModel={setCursorModel}
-          codexModel={codexModel}
-          setCodexModel={setCodexModel}
-          geminiModel={geminiModel}
-          setGeminiModel={setGeminiModel}
-          tasksEnabled={tasksEnabled}
-          isTaskMasterInstalled={isTaskMasterInstalled}
-          onShowAllTasks={onShowAllTasks}
-          setInput={setInput}
-          isLoadingMoreMessages={isLoadingMoreMessages}
-          hasMoreMessages={hasMoreMessages}
-          totalMessages={totalMessages}
-          sessionMessagesCount={sessionMessages.length}
-          visibleMessageCount={visibleMessageCount}
-          visibleMessages={visibleMessages}
-          loadEarlierMessages={loadEarlierMessages}
-          loadAllMessages={loadAllMessages}
-          allMessagesLoaded={allMessagesLoaded}
-          isLoadingAllMessages={isLoadingAllMessages}
-          loadAllJustFinished={loadAllJustFinished}
-          showLoadAllOverlay={showLoadAllOverlay}
-          createDiff={createDiff}
-          onFileOpen={onFileOpen}
-          onShowSettings={onShowSettings}
-          onGrantToolPermission={handleGrantToolPermission}
-          autoExpandTools={autoExpandTools}
-          showRawParameters={showRawParameters}
-          showThinking={showThinking}
-          selectedProject={selectedProject}
-          isLoading={isLoading}
-        />
+      <div className="h-full flex min-h-0">
+        <div className="flex-1 min-w-0 h-full flex flex-col">
+          <ChatMessagesPane
+            scrollContainerRef={scrollContainerRef}
+            onWheel={handleScroll}
+            onTouchMove={handleScroll}
+            isLoadingSessionMessages={isLoadingSessionMessages}
+            chatMessages={chatMessages}
+            selectedSession={selectedSession}
+            currentSessionId={currentSessionId}
+            provider={provider}
+            setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
+            textareaRef={textareaRef}
+            claudeModel={claudeModel}
+            setClaudeModel={setClaudeModel}
+            cursorModel={cursorModel}
+            setCursorModel={setCursorModel}
+            codexModel={codexModel}
+            setCodexModel={setCodexModel}
+            geminiModel={geminiModel}
+            setGeminiModel={setGeminiModel}
+            tasksEnabled={tasksEnabled}
+            isTaskMasterInstalled={isTaskMasterInstalled}
+            onShowAllTasks={onShowAllTasks}
+            setInput={setInput}
+            isLoadingMoreMessages={isLoadingMoreMessages}
+            hasMoreMessages={hasMoreMessages}
+            totalMessages={totalMessages}
+            sessionMessagesCount={sessionMessages.length}
+            visibleMessageCount={visibleMessageCount}
+            visibleMessages={visibleMessages}
+            loadEarlierMessages={loadEarlierMessages}
+            loadAllMessages={loadAllMessages}
+            allMessagesLoaded={allMessagesLoaded}
+            isLoadingAllMessages={isLoadingAllMessages}
+            loadAllJustFinished={loadAllJustFinished}
+            showLoadAllOverlay={showLoadAllOverlay}
+            createDiff={createDiff}
+            onFileOpen={onFileOpen}
+            onShowSettings={onShowSettings}
+            onGrantToolPermission={handleGrantToolPermission}
+            autoExpandTools={autoExpandTools}
+            showRawParameters={showRawParameters}
+            showThinking={showThinking}
+            selectedProject={selectedProject}
+            isLoading={isLoading}
+          />
 
-        <ChatComposer
-          pendingPermissionRequests={pendingPermissionRequests}
-          handlePermissionDecision={handlePermissionDecision}
-          handleGrantToolPermission={handleGrantToolPermission}
-          claudeStatus={claudeStatus}
-          isLoading={isLoading}
-          onAbortSession={handleAbortSession}
-          provider={provider}
-          permissionMode={permissionMode}
-          onModeSwitch={cyclePermissionMode}
-          thinkingMode={thinkingMode}
-          setThinkingMode={setThinkingMode}
-          tokenBudget={tokenBudget}
-          slashCommandsCount={slashCommandsCount}
-          onToggleCommandMenu={handleToggleCommandMenu}
-          hasInput={Boolean(input.trim())}
-          onClearInput={handleClearInput}
-          isUserScrolledUp={isUserScrolledUp}
-          hasMessages={chatMessages.length > 0}
-          onScrollToBottom={scrollToBottomAndReset}
-          onSubmit={handleSubmit}
-          isDragActive={isDragActive}
-          attachedImages={attachedImages}
-          onRemoveImage={(index) =>
-            setAttachedImages((previous) =>
-              previous.filter((_, currentIndex) => currentIndex !== index),
-            )
-          }
-          uploadingImages={uploadingImages}
-          imageErrors={imageErrors}
-          showFileDropdown={showFileDropdown}
-          filteredFiles={filteredFiles}
-          selectedFileIndex={selectedFileIndex}
-          onSelectFile={selectFile}
-          filteredCommands={filteredCommands}
-          selectedCommandIndex={selectedCommandIndex}
-          onCommandSelect={handleCommandSelect}
-          onCloseCommandMenu={resetCommandMenuState}
-          isCommandMenuOpen={showCommandMenu}
-          frequentCommands={commandQuery ? [] : frequentCommands}
-          getRootProps={getRootProps as (...args: unknown[]) => Record<string, unknown>}
-          getInputProps={getInputProps as (...args: unknown[]) => Record<string, unknown>}
-          openImagePicker={openImagePicker}
-          inputHighlightRef={inputHighlightRef}
-          renderInputWithMentions={renderInputWithMentions}
-          textareaRef={textareaRef}
-          input={input}
-          onInputChange={handleInputChange}
-          onTextareaClick={handleTextareaClick}
-          onTextareaKeyDown={handleKeyDown}
-          onTextareaPaste={handlePaste}
-          onTextareaScrollSync={syncInputOverlayScroll}
-          onTextareaInput={handleTextareaInput}
-          onInputFocusChange={handleInputFocusChange}
-          isInputFocused={isInputFocused}
-          placeholder={t('input.placeholder', {
-            provider:
-              provider === 'cursor'
-                ? t('messageTypes.cursor')
-                : provider === 'codex'
-                  ? t('messageTypes.codex')
-                  : provider === 'gemini'
-                    ? t('messageTypes.gemini')
-                    : t('messageTypes.claude'),
-          })}
-          isTextareaExpanded={isTextareaExpanded}
-          sendByCtrlEnter={sendByCtrlEnter}
-          onTranscript={handleTranscript}
-        />
+          <ChatComposer
+            pendingPermissionRequests={pendingPermissionRequests}
+            handlePermissionDecision={handlePermissionDecision}
+            handleGrantToolPermission={handleGrantToolPermission}
+            claudeStatus={claudeStatus}
+            isLoading={isLoading}
+            onAbortSession={handleAbortSession}
+            provider={provider}
+            permissionMode={permissionMode}
+            onModeSwitch={cyclePermissionMode}
+            thinkingMode={thinkingMode}
+            setThinkingMode={setThinkingMode}
+            tokenBudget={tokenBudget}
+            slashCommandsCount={slashCommandsCount}
+            onToggleCommandMenu={handleToggleCommandMenu}
+            hasInput={Boolean(input.trim())}
+            onClearInput={handleClearInput}
+            isUserScrolledUp={isUserScrolledUp}
+            hasMessages={chatMessages.length > 0}
+            onScrollToBottom={scrollToBottomAndReset}
+            onSubmit={handleSubmit}
+            isDragActive={isDragActive}
+            attachedImages={attachedImages}
+            onRemoveImage={(index) =>
+              setAttachedImages((previous) =>
+                previous.filter((_, currentIndex) => currentIndex !== index),
+              )
+            }
+            uploadingImages={uploadingImages}
+            imageErrors={imageErrors}
+            showFileDropdown={showFileDropdown}
+            filteredFiles={filteredFiles}
+            selectedFileIndex={selectedFileIndex}
+            onSelectFile={selectFile}
+            filteredCommands={filteredCommands}
+            selectedCommandIndex={selectedCommandIndex}
+            onCommandSelect={handleCommandSelect}
+            onCloseCommandMenu={resetCommandMenuState}
+            isCommandMenuOpen={showCommandMenu}
+            frequentCommands={commandQuery ? [] : frequentCommands}
+            getRootProps={getRootProps as (...args: unknown[]) => Record<string, unknown>}
+            getInputProps={getInputProps as (...args: unknown[]) => Record<string, unknown>}
+            openImagePicker={openImagePicker}
+            inputHighlightRef={inputHighlightRef}
+            renderInputWithMentions={renderInputWithMentions}
+            textareaRef={textareaRef}
+            input={input}
+            onInputChange={handleInputChange}
+            onTextareaClick={handleTextareaClick}
+            onTextareaKeyDown={handleKeyDown}
+            onTextareaPaste={handlePaste}
+            onTextareaScrollSync={syncInputOverlayScroll}
+            onTextareaInput={handleTextareaInput}
+            onInputFocusChange={handleInputFocusChange}
+            isInputFocused={isInputFocused}
+            placeholder={t('input.placeholder', {
+              provider:
+                provider === 'cursor'
+                  ? t('messageTypes.cursor')
+                  : provider === 'codex'
+                    ? t('messageTypes.codex')
+                    : provider === 'gemini'
+                      ? t('messageTypes.gemini')
+                      : t('messageTypes.claude'),
+            })}
+            isTextareaExpanded={isTextareaExpanded}
+            sendByCtrlEnter={sendByCtrlEnter}
+            onTranscript={handleTranscript}
+          />
+        </div>
+
+        {tasksEnabled && isTaskMasterInstalled && selectedProject && (
+          <ProjectKanbanAssistantPanel
+            tasks={tasks as Array<Record<string, unknown>>}
+            onCreateTaskWithPrompt={handleCreateTaskWithPrompt}
+            isSubmittingPrompt={isSubmittingTaskPrompt}
+            isLoadingTasks={Boolean(isLoadingTasks)}
+          />
+        )}
       </div>
 
       <QuickSettingsPanel />

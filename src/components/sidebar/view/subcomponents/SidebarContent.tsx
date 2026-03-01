@@ -15,6 +15,7 @@ type SidebarContentProps = {
   onSearchFilterChange: (value: string) => void;
   onClearSearchFilter: () => void;
   onRefresh: () => void;
+  onOpenDashboard: () => void;
   isRefreshing: boolean;
   onCreateProject: () => void;
   onCollapseSidebar: () => void;
@@ -36,6 +37,7 @@ export default function SidebarContent({
   onSearchFilterChange,
   onClearSearchFilter,
   onRefresh,
+  onOpenDashboard,
   isRefreshing,
   onCreateProject,
   onCollapseSidebar,
@@ -49,7 +51,7 @@ export default function SidebarContent({
 }: SidebarContentProps) {
   return (
     <div
-      className="h-full flex flex-col bg-background/80 backdrop-blur-sm md:select-none md:w-72"
+      className="h-full flex flex-col bg-background md:select-none md:w-72"
       style={{}}
     >
       <SidebarHeader
@@ -61,6 +63,7 @@ export default function SidebarContent({
         onSearchFilterChange={onSearchFilterChange}
         onClearSearchFilter={onClearSearchFilter}
         onRefresh={onRefresh}
+        onOpenDashboard={onOpenDashboard}
         isRefreshing={isRefreshing}
         onCreateProject={onCreateProject}
         onCollapseSidebar={onCollapseSidebar}

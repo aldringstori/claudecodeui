@@ -30,6 +30,7 @@ function Sidebar({
   isLoading,
   loadingProgress,
   onRefresh,
+  onOpenDashboard,
   onShowSettings,
   showSettings,
   settingsInitialTab,
@@ -225,6 +226,7 @@ function Sidebar({
             onRefresh={() => {
               void refreshProjects();
             }}
+            onOpenDashboard={onOpenDashboard}
             isRefreshing={isRefreshing}
             onCreateProject={() => setShowNewProject(true)}
             onCollapseSidebar={handleCollapseSidebar}

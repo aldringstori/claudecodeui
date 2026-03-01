@@ -1,6 +1,6 @@
 export type SessionProvider = 'claude' | 'cursor' | 'codex' | 'gemini';
 
-export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'tasks' | 'preview';
+export type AppTab = 'dashboard' | 'chat' | 'files' | 'shell' | 'git' | 'tasks' | 'preview';
 
 export interface ProjectSession {
   id: string;

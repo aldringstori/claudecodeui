@@ -9,6 +9,7 @@ import ErrorBoundary from '../../ErrorBoundary';
 import MainContentHeader from './subcomponents/MainContentHeader';
 import MainContentStateView from './subcomponents/MainContentStateView';
 import TaskMasterPanel from './subcomponents/TaskMasterPanel';
+import ProjectsDashboardPanel from './subcomponents/ProjectsDashboardPanel';
 import type { MainContentProps } from '../types/types';
 
 import { useTaskMaster } from '../../../contexts/TaskMasterContext';
@@ -30,6 +31,7 @@ type TasksSettingsContextValue = {
 };
 
 function MainContent({
+  projects,
   selectedProject,
   selectedSession,
   activeTab,
@@ -56,6 +58,7 @@ function MainContent({
 
   const { currentProject, setCurrentProject } = useTaskMaster() as TaskMasterContextValue;
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings() as TasksSettingsContextValue;
+  const isDashboardView = activeTab === 'dashboard';
 
   const shouldShowTasksTab = Boolean(tasksEnabled && isTaskMasterInstalled);
 
@@ -90,7 +93,7 @@ function MainContent({
     return <MainContentStateView mode="loading" isMobile={isMobile} onMenuClick={onMenuClick} />;
   }
 
-  if (!selectedProject) {
+  if (!selectedProject && !isDashboardView) {
     return <MainContentStateView mode="empty" isMobile={isMobile} onMenuClick={onMenuClick} />;
   }
 
@@ -108,6 +111,12 @@ function MainContent({
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <div className={`flex flex-col min-h-0 min-w-0 overflow-hidden ${editorExpanded ? 'hidden' : ''} flex-1`}>
+          {isDashboardView && (
+            <div className="h-full overflow-hidden">
+              <ProjectsDashboardPanel projects={projects} />
+            </div>
+          )}
+
           <div className={`h-full ${activeTab === 'chat' ? 'block' : 'hidden'}`}>
             <ErrorBoundary showDetails>
               <ChatInterface
@@ -137,42 +146,44 @@ function MainContent({
             </ErrorBoundary>
           </div>
 
-          {activeTab === 'files' && (
+          {selectedProject && activeTab === 'files' && (
             <div className="h-full overflow-hidden">
               <FileTree selectedProject={selectedProject} onFileOpen={handleFileOpen} />
             </div>
           )}
 
-          {activeTab === 'shell' && (
+          {selectedProject && activeTab === 'shell' && (
             <div className="h-full w-full overflow-hidden">
               <StandaloneShell project={selectedProject} session={selectedSession} showHeader={false} />
             </div>
           )}
 
-          {activeTab === 'git' && (
+          {selectedProject && activeTab === 'git' && (
             <div className="h-full overflow-hidden">
               <GitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
             </div>
           )}
 
-          {shouldShowTasksTab && <TaskMasterPanel isVisible={activeTab === 'tasks'} />}
+          {selectedProject && shouldShowTasksTab && <TaskMasterPanel isVisible={activeTab === 'tasks'} />}
 
           <div className={`h-full overflow-hidden ${activeTab === 'preview' ? 'block' : 'hidden'}`} />
         </div>
 
-        <EditorSidebar
-          editingFile={editingFile}
-          isMobile={isMobile}
-          editorExpanded={editorExpanded}
-          editorWidth={editorWidth}
-          hasManualWidth={hasManualWidth}
-          resizeHandleRef={resizeHandleRef}
-          onResizeStart={handleResizeStart}
-          onCloseEditor={handleCloseEditor}
-          onToggleEditorExpand={handleToggleEditorExpand}
-          projectPath={selectedProject.path}
-          fillSpace={activeTab === 'files'}
-        />
+        {selectedProject && !isDashboardView && (
+          <EditorSidebar
+            editingFile={editingFile}
+            isMobile={isMobile}
+            editorExpanded={editorExpanded}
+            editorWidth={editorWidth}
+            hasManualWidth={hasManualWidth}
+            resizeHandleRef={resizeHandleRef}
+            onResizeStart={handleResizeStart}
+            onCloseEditor={handleCloseEditor}
+            onToggleEditorExpand={handleToggleEditorExpand}
+            projectPath={selectedProject.path}
+            fillSpace={activeTab === 'files'}
+          />
+        )}
       </div>
     </div>
   );

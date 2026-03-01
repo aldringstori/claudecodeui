@@ -62,10 +62,105 @@ import fsSync from 'fs';
 import path from 'path';
 import readline from 'readline';
 import crypto from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import os from 'os';
 import sessionManager from './sessionManager.js';
+
+const execFileAsync = promisify(execFile);
+
+const PROJECT_SCAN_EXCLUDED_DIR_NAMES = new Set([
+  'node_modules',
+  'dist',
+  'build',
+  '.git',
+  '.svn',
+  '.hg'
+]);
+
+const PROJECT_MARKER_NAMES = new Set([
+  '.git',
+  'package.json',
+  'pyproject.toml',
+  'requirements.txt',
+  'pipfile',
+  'cargo.toml',
+  'go.mod',
+  'composer.json',
+  'gemfile',
+  'pom.xml',
+  'build.gradle',
+  'build.gradle.kts',
+  'dockerfile',
+  'docker-compose.yml',
+  'docker-compose.yaml',
+  'makefile'
+]);
+
+const PREFERRED_WEB_PORTS = [
+  80,
+  443,
+  3000,
+  3001,
+  3002,
+  3003,
+  4173,
+  4200,
+  4321,
+  5000,
+  5173,
+  5174,
+  5175,
+  5500,
+  8000,
+  8080,
+  8081,
+  8888,
+  9000,
+  10000
+];
+
+const WEB_PORT_HINTS = new Set(PREFERRED_WEB_PORTS);
+
+const KNOWN_WEB_PROCESS_NAMES = new Set([
+  'bun',
+  'deno',
+  'java',
+  'node',
+  'php',
+  'python',
+  'python3',
+  'ruby',
+  'uvicorn',
+  'vite'
+]);
+
+const NON_WEB_PROCESS_NAMES = new Set([
+  'containerd',
+  'dockerd',
+  'mongod',
+  'mysqld',
+  'postgres',
+  'redis-server'
+]);
+
+const KNOWN_WEB_CONTAINER_PORTS = new Set([
+  80,
+  443,
+  3000,
+  4173,
+  4200,
+  5000,
+  5173,
+  5174,
+  8000,
+  8080,
+  8081
+]);
+
+const WEB_SERVICE_NAME_HINTS = ['app', 'api', 'frontend', 'nginx', 'proxy', 'ui', 'web'];
 
 // Import TaskMaster detection functions
 async function detectTaskMasterFolder(projectPath) {
@@ -232,10 +327,696 @@ async function saveProjectConfig(config) {
   await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
 }
 
+function encodeProjectName(projectPath) {
+  const absolutePath = path.resolve(projectPath);
+  return absolutePath.replace(/[\\/:\s~_]/g, '-');
+}
+
+function getProjectDiscoveryRoots() {
+  const envRoots = process.env.PROJECT_DISCOVERY_ROOTS
+    ? process.env.PROJECT_DISCOVERY_ROOTS
+      .split(',')
+      .map((root) => root.trim())
+      .filter(Boolean)
+    : [];
+
+  const configuredRoots = envRoots.length > 0
+    ? envRoots
+    : [process.env.WORKSPACES_ROOT || os.homedir()];
+
+  const uniqueRoots = [];
+  const seenRoots = new Set();
+
+  for (const root of configuredRoots) {
+    const resolvedRoot = path.resolve(root);
+    const key = process.platform === 'win32' ? resolvedRoot.toLowerCase() : resolvedRoot;
+
+    if (!seenRoots.has(key)) {
+      seenRoots.add(key);
+      uniqueRoots.push(resolvedRoot);
+    }
+  }
+
+  return uniqueRoots;
+}
+
+function isDiscoverableProjectDirectory(entryName) {
+  if (!entryName || entryName.startsWith('.')) {
+    return false;
+  }
+
+  return !PROJECT_SCAN_EXCLUDED_DIR_NAMES.has(entryName);
+}
+
+async function discoverFilesystemProjectPaths() {
+  const roots = getProjectDiscoveryRoots();
+  const discoveredPaths = [];
+  const seenPaths = new Set();
+
+  for (const rootPath of roots) {
+    try {
+      const entries = await fs.readdir(rootPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !isDiscoverableProjectDirectory(entry.name)) {
+          continue;
+        }
+
+        const fullPath = path.join(rootPath, entry.name);
+        // Include only directories that look like actual workspaces/repositories.
+        if (!(await hasProjectMarkers(fullPath))) {
+          continue;
+        }
+
+        const normalizedPath = normalizeComparablePath(fullPath);
+        if (!normalizedPath || seenPaths.has(normalizedPath)) {
+          continue;
+        }
+
+        seenPaths.add(normalizedPath);
+        discoveredPaths.push(fullPath);
+      }
+    } catch {
+      // Skip unreadable/nonexistent roots.
+    }
+  }
+
+  return discoveredPaths;
+}
+
+async function hasProjectMarkers(projectPath) {
+  try {
+    const entries = await fs.readdir(projectPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryName = entry.name.toLowerCase();
+      if (PROJECT_MARKER_NAMES.has(entryName)) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+function parsePortNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const directMatch = trimmed.match(/^(\d+)$/);
+  if (directMatch) {
+    const port = Number.parseInt(directMatch[1], 10);
+    return Number.isFinite(port) && port > 0 ? port : null;
+  }
+
+  const addressMatch = trimmed.match(/:(\d+)$/);
+  if (addressMatch) {
+    const port = Number.parseInt(addressMatch[1], 10);
+    return Number.isFinite(port) && port > 0 ? port : null;
+  }
+
+  const mappedMatch = trimmed.match(/(\d+)\s*:\s*\d+/);
+  if (mappedMatch) {
+    const port = Number.parseInt(mappedMatch[1], 10);
+    return Number.isFinite(port) && port > 0 ? port : null;
+  }
+
+  return null;
+}
+
+function isLikelyWebPort(port) {
+  if (!Number.isFinite(port) || port <= 0) {
+    return false;
+  }
+
+  if (WEB_PORT_HINTS.has(port)) {
+    return true;
+  }
+
+  // Dev servers often use 3xxx.
+  if (port >= 3000 && port <= 3999) {
+    return true;
+  }
+
+  return false;
+}
+
+function getPortPreferenceScore(port) {
+  const preferredIndex = PREFERRED_WEB_PORTS.indexOf(port);
+  if (preferredIndex >= 0) {
+    return preferredIndex;
+  }
+  return 1000 + port;
+}
+
+function addRuntimeCandidate(runtimeByPath, inputPath, candidate) {
+  const normalizedPath = normalizeComparablePath(inputPath);
+  if (!normalizedPath) {
+    return;
+  }
+
+  const port = parsePortNumber(candidate?.port);
+  if (!port) {
+    return;
+  }
+
+  if (!runtimeByPath.has(normalizedPath)) {
+    runtimeByPath.set(normalizedPath, []);
+  }
+
+  const candidates = runtimeByPath.get(normalizedPath);
+  const duplicate = candidates.some((existing) => existing.port === port && existing.source === candidate.source);
+  if (duplicate) {
+    return;
+  }
+
+  candidates.push({
+    port,
+    source: candidate.source,
+    processName: candidate.processName || null,
+    containerPort: parsePortNumber(candidate.containerPort),
+    serviceName: typeof candidate.serviceName === 'string' ? candidate.serviceName : null,
+    webHint: Boolean(candidate.webHint)
+  });
+}
+
+async function getListeningProcessRuntimeCandidates() {
+  const runtimeByPath = new Map();
+  let stdout = '';
+
+  try {
+    const result = await execFileAsync('ss', ['-ltnpH'], { maxBuffer: 1024 * 1024 });
+    stdout = result.stdout || '';
+  } catch {
+    return runtimeByPath;
+  }
+
+  if (!stdout.trim()) {
+    return runtimeByPath;
+  }
+
+  const rows = stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const portBindings = [];
+
+  for (const line of rows) {
+    const columns = line.split(/\s+/);
+    if (columns.length < 4) {
+      continue;
+    }
+
+    const localAddress = columns[3];
+    const port = parsePortNumber(localAddress);
+    if (!port) {
+      continue;
+    }
+
+    const processMatches = line.matchAll(/"([^"]+)",pid=(\d+)/g);
+    for (const match of processMatches) {
+      const processName = (match[1] || '').trim();
+      const pid = Number.parseInt(match[2], 10);
+      if (!Number.isFinite(pid) || pid <= 0) {
+        continue;
+      }
+
+      portBindings.push({
+        pid,
+        port,
+        processName: processName.toLowerCase()
+      });
+    }
+  }
+
+  if (portBindings.length === 0) {
+    return runtimeByPath;
+  }
+
+  const uniquePids = [...new Set(portBindings.map((entry) => entry.pid))];
+  const pidToCwd = new Map();
+
+  await Promise.all(uniquePids.map(async (pid) => {
+    try {
+      const cwd = await fs.realpath(`/proc/${pid}/cwd`);
+      const normalizedCwd = normalizeComparablePath(cwd);
+      if (normalizedCwd) {
+        pidToCwd.set(pid, normalizedCwd);
+      }
+    } catch {
+      // Ignore inaccessible/exited processes.
+    }
+  }));
+
+  for (const binding of portBindings) {
+    const processName = binding.processName || '';
+    if (NON_WEB_PROCESS_NAMES.has(processName)) {
+      continue;
+    }
+
+    const cwd = pidToCwd.get(binding.pid);
+    if (!cwd) {
+      continue;
+    }
+
+    const webHint = isLikelyWebPort(binding.port) || KNOWN_WEB_PROCESS_NAMES.has(processName);
+
+    addRuntimeCandidate(runtimeByPath, cwd, {
+      port: binding.port,
+      source: 'process',
+      processName,
+      webHint
+    });
+  }
+
+  return runtimeByPath;
+}
+
+function extractDockerHostPorts(portsConfig) {
+  if (!portsConfig || typeof portsConfig !== 'object') {
+    return [];
+  }
+
+  const bindings = [];
+  for (const [containerPortKey, hostBindings] of Object.entries(portsConfig)) {
+    const containerPort = parsePortNumber(containerPortKey);
+    if (!Array.isArray(hostBindings) || hostBindings.length === 0) {
+      continue;
+    }
+
+    for (const hostBinding of hostBindings) {
+      const hostPort = parsePortNumber(hostBinding?.HostPort);
+      if (!hostPort) {
+        continue;
+      }
+      bindings.push({ hostPort, containerPort });
+    }
+  }
+
+  return bindings;
+}
+
+function getDockerCandidatePaths(containerInfo) {
+  const candidates = new Set();
+
+  const labels = containerInfo?.Config?.Labels || {};
+  const composeWorkingDir = labels['com.docker.compose.project.working_dir'];
+  if (typeof composeWorkingDir === 'string' && composeWorkingDir.trim()) {
+    candidates.add(composeWorkingDir.trim());
+  }
+
+  const composeConfigFiles = labels['com.docker.compose.project.config_files'];
+  if (typeof composeConfigFiles === 'string' && composeConfigFiles.trim()) {
+    const configFiles = composeConfigFiles
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (configFiles.length > 0) {
+      const configDir = path.dirname(configFiles[0]);
+      if (configDir) {
+        candidates.add(configDir);
+      }
+    }
+  }
+
+  return [...candidates];
+}
+
+async function getDockerRuntimeCandidates() {
+  const runtimeByPath = new Map();
+  let containerIds = [];
+
+  try {
+    const result = await execFileAsync('docker', ['ps', '-q'], { maxBuffer: 1024 * 1024 });
+    containerIds = (result.stdout || '')
+      .split('\n')
+      .map((id) => id.trim())
+      .filter(Boolean);
+  } catch {
+    return runtimeByPath;
+  }
+
+  if (containerIds.length === 0) {
+    return runtimeByPath;
+  }
+
+  let inspectPayload = '';
+  try {
+    const result = await execFileAsync('docker', ['inspect', ...containerIds], {
+      maxBuffer: 15 * 1024 * 1024
+    });
+    inspectPayload = result.stdout || '';
+  } catch {
+    return runtimeByPath;
+  }
+
+  if (!inspectPayload.trim()) {
+    return runtimeByPath;
+  }
+
+  let inspectedContainers = [];
+  try {
+    inspectedContainers = JSON.parse(inspectPayload);
+  } catch {
+    return runtimeByPath;
+  }
+
+  for (const containerInfo of inspectedContainers) {
+    const labels = containerInfo?.Config?.Labels || {};
+    const serviceName = typeof labels['com.docker.compose.service'] === 'string'
+      ? labels['com.docker.compose.service'].toLowerCase()
+      : null;
+    const serviceHint = serviceName
+      ? WEB_SERVICE_NAME_HINTS.some((hint) => serviceName.includes(hint))
+      : false;
+
+    const candidatePaths = getDockerCandidatePaths(containerInfo);
+    if (candidatePaths.length === 0) {
+      continue;
+    }
+
+    const exposedPorts = extractDockerHostPorts(containerInfo?.NetworkSettings?.Ports);
+    for (const { hostPort, containerPort } of exposedPorts) {
+      const webHint = isLikelyWebPort(hostPort) ||
+        (containerPort ? KNOWN_WEB_CONTAINER_PORTS.has(containerPort) : false) ||
+        serviceHint;
+
+      for (const candidatePath of candidatePaths) {
+        addRuntimeCandidate(runtimeByPath, candidatePath, {
+          port: hostPort,
+          containerPort,
+          source: 'docker',
+          serviceName,
+          webHint
+        });
+      }
+    }
+  }
+
+  return runtimeByPath;
+}
+
+function collectRuntimeCandidatesForProject(runtimeByPath, projectPath) {
+  const normalizedProjectPath = normalizeComparablePath(projectPath);
+  if (!normalizedProjectPath) {
+    return [];
+  }
+
+  const projectPrefix = `${normalizedProjectPath}${path.sep}`;
+  const collected = [];
+
+  for (const [candidatePath, candidates] of runtimeByPath.entries()) {
+    const candidatePrefix = `${candidatePath}${path.sep}`;
+    let pathDistance = -1;
+
+    if (candidatePath === normalizedProjectPath) {
+      pathDistance = 0;
+    } else if (candidatePath.startsWith(projectPrefix)) {
+      // Process/container path lives inside project root.
+      pathDistance = 1;
+    }
+
+    if (pathDistance < 0) {
+      continue;
+    }
+
+    for (const candidate of candidates) {
+      collected.push({
+        ...candidate,
+        pathDistance
+      });
+    }
+  }
+
+  return collected;
+}
+
+function selectBestRuntimeCandidate(candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return null;
+  }
+
+  const deduped = new Map();
+  for (const candidate of candidates) {
+    if (!candidate?.port) {
+      continue;
+    }
+    const key = `${candidate.source || 'unknown'}:${candidate.port}`;
+    const existing = deduped.get(key);
+    if (!existing || candidate.pathDistance < existing.pathDistance || (candidate.webHint && !existing.webHint)) {
+      deduped.set(key, candidate);
+    }
+  }
+
+  const normalizedCandidates = [...deduped.values()];
+  if (normalizedCandidates.length === 0) {
+    return null;
+  }
+
+  const preferredSet = normalizedCandidates.filter((candidate) => candidate.webHint);
+  if (preferredSet.length === 0) {
+    return null;
+  }
+
+  preferredSet.sort((a, b) => {
+    const aSourceScore = a.source === 'process' ? 0 : 1;
+    const bSourceScore = b.source === 'process' ? 0 : 1;
+    if (aSourceScore !== bSourceScore) {
+      return aSourceScore - bSourceScore;
+    }
+
+    if (a.pathDistance !== b.pathDistance) {
+      return a.pathDistance - b.pathDistance;
+    }
+
+    const aPortScore = getPortPreferenceScore(a.port);
+    const bPortScore = getPortPreferenceScore(b.port);
+    if (aPortScore !== bPortScore) {
+      return aPortScore - bPortScore;
+    }
+
+    return a.port - b.port;
+  });
+
+  return preferredSet[0] || null;
+}
+
+async function enrichProjectsWithAccessUrls(projects) {
+  if (!Array.isArray(projects) || projects.length === 0) {
+    return;
+  }
+
+  let processRuntimeByPath = new Map();
+  let dockerRuntimeByPath = new Map();
+
+  try {
+    [processRuntimeByPath, dockerRuntimeByPath] = await Promise.all([
+      getListeningProcessRuntimeCandidates(),
+      getDockerRuntimeCandidates()
+    ]);
+  } catch {
+    return;
+  }
+
+  const runtimeByPath = new Map();
+  for (const [runtimePath, candidates] of processRuntimeByPath.entries()) {
+    runtimeByPath.set(runtimePath, [...candidates]);
+  }
+
+  for (const [runtimePath, candidates] of dockerRuntimeByPath.entries()) {
+    if (!runtimeByPath.has(runtimePath)) {
+      runtimeByPath.set(runtimePath, []);
+    }
+    runtimeByPath.get(runtimePath).push(...candidates);
+  }
+
+  for (const project of projects) {
+    if (!project || typeof project !== 'object') {
+      continue;
+    }
+
+    const existingUrl = typeof project.url === 'string' ? project.url.trim() : '';
+    if (existingUrl) {
+      continue;
+    }
+
+    const projectPath = project.fullPath || project.path;
+    if (typeof projectPath !== 'string' || !projectPath.trim()) {
+      continue;
+    }
+
+    const candidates = collectRuntimeCandidatesForProject(runtimeByPath, projectPath);
+    const runtimeCandidate = selectBestRuntimeCandidate(candidates);
+    if (!runtimeCandidate) {
+      continue;
+    }
+
+    project.port = runtimeCandidate.port;
+    project.url = `http://127.0.0.1:${runtimeCandidate.port}`;
+    project.runtimeSource = runtimeCandidate.source;
+  }
+}
+
+function getProjectSessionWeight(project) {
+  return (project.sessionMeta?.total || 0) +
+    (project.sessions?.length || 0) +
+    (project.cursorSessions?.length || 0) +
+    (project.codexSessions?.length || 0) +
+    (project.geminiSessions?.length || 0);
+}
+
+function dedupeArrayById(values) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return [];
+  }
+
+  const deduped = new Map();
+  values.forEach((item) => {
+    const key = item?.id || JSON.stringify(item);
+    if (!deduped.has(key)) {
+      deduped.set(key, item);
+    }
+  });
+  return Array.from(deduped.values());
+}
+
+function shouldPreferCandidate(candidate, existing) {
+  const candidateWeight = getProjectSessionWeight(candidate);
+  const existingWeight = getProjectSessionWeight(existing);
+
+  if (candidateWeight !== existingWeight) {
+    return candidateWeight > existingWeight;
+  }
+
+  const candidateExists = fsSync.existsSync(candidate.fullPath || candidate.path || '');
+  const existingExists = fsSync.existsSync(existing.fullPath || existing.path || '');
+  if (candidateExists !== existingExists) {
+    return candidateExists;
+  }
+
+  if (!!candidate.isCustomName !== !!existing.isCustomName) {
+    return !!candidate.isCustomName;
+  }
+
+  return false;
+}
+
+function mergeProjects(primary, secondary) {
+  const merged = { ...primary };
+
+  merged.sessions = dedupeArrayById([...(primary.sessions || []), ...(secondary.sessions || [])]);
+  merged.cursorSessions = dedupeArrayById([...(primary.cursorSessions || []), ...(secondary.cursorSessions || [])]);
+  merged.codexSessions = dedupeArrayById([...(primary.codexSessions || []), ...(secondary.codexSessions || [])]);
+  merged.geminiSessions = dedupeArrayById([...(primary.geminiSessions || []), ...(secondary.geminiSessions || [])]);
+
+  merged.sessionMeta = {
+    hasMore: Boolean(primary.sessionMeta?.hasMore || secondary.sessionMeta?.hasMore),
+    total: Math.max(primary.sessionMeta?.total || 0, secondary.sessionMeta?.total || 0)
+  };
+
+  if (secondary.taskmaster?.status === 'configured' && primary.taskmaster?.status !== 'configured') {
+    merged.taskmaster = secondary.taskmaster;
+  }
+
+  if (!merged.isCustomName && secondary.isCustomName && secondary.displayName) {
+    merged.displayName = secondary.displayName;
+    merged.isCustomName = true;
+  }
+
+  if (!merged.path && secondary.path) {
+    merged.path = secondary.path;
+  }
+  if (!merged.fullPath && secondary.fullPath) {
+    merged.fullPath = secondary.fullPath;
+  }
+
+  return merged;
+}
+
+function dedupeProjectsByPath(projects) {
+  const dedupedByPath = new Map();
+  const pathlessProjects = [];
+
+  for (const project of projects) {
+    const pathKey = normalizeComparablePath(project.fullPath || project.path);
+    if (!pathKey) {
+      pathlessProjects.push(project);
+      continue;
+    }
+
+    const existingProject = dedupedByPath.get(pathKey);
+    if (!existingProject) {
+      dedupedByPath.set(pathKey, project);
+      continue;
+    }
+
+    if (shouldPreferCandidate(project, existingProject)) {
+      dedupedByPath.set(pathKey, mergeProjects(project, existingProject));
+    } else {
+      dedupedByPath.set(pathKey, mergeProjects(existingProject, project));
+    }
+  }
+
+  return [...dedupedByPath.values(), ...pathlessProjects];
+}
+
+function ensureUniqueDisplayNames(projects) {
+  const groupedByDisplayName = new Map();
+
+  projects.forEach((project) => {
+    const key = (project.displayName || '').trim().toLowerCase();
+    if (!groupedByDisplayName.has(key)) {
+      groupedByDisplayName.set(key, []);
+    }
+    groupedByDisplayName.get(key).push(project);
+  });
+
+  for (const group of groupedByDisplayName.values()) {
+    if (group.length <= 1) {
+      continue;
+    }
+
+    group.forEach((project) => {
+      if (!project.displayName) {
+        return;
+      }
+
+      const fallbackPath = project.fullPath || project.path || project.name || '';
+      const relativePath = fallbackPath ? path.relative(os.homedir(), fallbackPath) : '';
+      const suffix = relativePath && !relativePath.startsWith('..') ? relativePath : fallbackPath;
+      if (suffix) {
+        project.displayName = `${project.displayName} (${suffix})`;
+      }
+    });
+  }
+
+  return projects;
+}
+
 // Generate better display name from path
 async function generateDisplayName(projectName, actualProjectDir = null) {
   // Use actual project directory if provided, otherwise decode from project name
   let projectPath = actualProjectDir || projectName.replace(/-/g, '/');
+
+  // Prefer directory names so renamed folders are reflected immediately.
+  if (typeof projectPath === 'string' && path.isAbsolute(projectPath)) {
+    const folderName = path.basename(path.normalize(projectPath));
+    if (folderName) {
+      return folderName;
+    }
+  }
 
   // Try to read package.json from the project path
   try {
@@ -385,6 +1166,7 @@ async function getProjects(progressCallback = null) {
   const config = await loadProjectConfig();
   const projects = [];
   const existingProjects = new Set();
+  const existingProjectPaths = new Set();
   const codexSessionsIndexRef = { sessionsByProject: null };
   let totalProjects = 0;
   let processedProjects = 0;
@@ -505,6 +1287,10 @@ async function getProjects(progressCallback = null) {
       }
 
       projects.push(project);
+      const normalizedPath = normalizeComparablePath(actualProjectDir);
+      if (normalizedPath) {
+        existingProjectPaths.add(normalizedPath);
+      }
     }
   } catch (error) {
     // If the directory doesn't exist (ENOENT), that's okay - just continue with empty projects
@@ -611,7 +1397,105 @@ async function getProjects(progressCallback = null) {
       }
 
       projects.push(project);
+      const normalizedPath = normalizeComparablePath(actualProjectDir);
+      if (normalizedPath) {
+        existingProjectPaths.add(normalizedPath);
+      }
     }
+  }
+
+  // Add projects discovered directly from workspace folders (e.g. /home/stori/*).
+  const filesystemProjectPaths = await discoverFilesystemProjectPaths();
+  const filesystemCandidates = filesystemProjectPaths.filter((projectPath) => {
+    const normalizedPath = normalizeComparablePath(projectPath);
+    return normalizedPath && !existingProjectPaths.has(normalizedPath);
+  });
+
+  totalProjects += filesystemCandidates.length;
+
+  for (const projectPath of filesystemCandidates) {
+    const projectName = encodeProjectName(projectPath);
+    processedProjects++;
+
+    if (progressCallback) {
+      progressCallback({
+        phase: 'loading',
+        current: processedProjects,
+        total: totalProjects,
+        currentProject: projectName
+      });
+    }
+
+    const customName = config[projectName]?.displayName;
+    const project = {
+      name: projectName,
+      path: projectPath,
+      displayName: customName || await generateDisplayName(projectName, projectPath),
+      fullPath: projectPath,
+      isCustomName: !!customName,
+      isManuallyAdded: true,
+      sessions: [],
+      geminiSessions: [],
+      sessionMeta: {
+        hasMore: false,
+        total: 0
+      },
+      cursorSessions: [],
+      codexSessions: []
+    };
+
+    // If a Claude project folder exists for this path, load Claude sessions too.
+    if (existingProjects.has(projectName)) {
+      try {
+        const sessionResult = await getSessions(projectName, 5, 0);
+        project.sessions = sessionResult.sessions || [];
+        project.sessionMeta = {
+          hasMore: sessionResult.hasMore,
+          total: sessionResult.total
+        };
+      } catch (e) {
+        console.warn(`Could not load sessions for discovered project ${projectName}:`, e.message);
+      }
+    }
+
+    try {
+      project.cursorSessions = await getCursorSessions(projectPath);
+    } catch (e) {
+      console.warn(`Could not load Cursor sessions for discovered project ${projectName}:`, e.message);
+    }
+
+    try {
+      project.codexSessions = await getCodexSessions(projectPath, {
+        indexRef: codexSessionsIndexRef,
+      });
+    } catch (e) {
+      console.warn(`Could not load Codex sessions for discovered project ${projectName}:`, e.message);
+    }
+
+    try {
+      project.geminiSessions = sessionManager.getProjectSessions(projectPath) || [];
+    } catch (e) {
+      console.warn(`Could not load Gemini sessions for discovered project ${projectName}:`, e.message);
+    }
+
+    try {
+      const taskMasterResult = await detectTaskMasterFolder(projectPath);
+      project.taskmaster = {
+        status: taskMasterResult.hasTaskmaster && taskMasterResult.hasEssentialFiles ? 'taskmaster-only' : 'not-configured',
+        hasTaskmaster: taskMasterResult.hasTaskmaster,
+        hasEssentialFiles: taskMasterResult.hasEssentialFiles,
+        metadata: taskMasterResult.metadata
+      };
+    } catch (error) {
+      project.taskmaster = {
+        status: 'error',
+        hasTaskmaster: false,
+        hasEssentialFiles: false,
+        error: error.message
+      };
+    }
+
+    projects.push(project);
   }
 
   // Emit completion after all projects (including manual) are processed
@@ -623,7 +1507,9 @@ async function getProjects(progressCallback = null) {
     });
   }
 
-  return projects;
+  const finalProjects = ensureUniqueDisplayNames(dedupeProjectsByPath(projects));
+  await enrichProjectsWithAccessUrls(finalProjects);
+  return finalProjects;
 }
 
 async function getSessions(projectName, limit = 5, offset = 0) {
@@ -1215,7 +2101,7 @@ async function addProjectManually(projectPath, displayName = null) {
   }
 
   // Generate project name (encode path for use as directory name)
-  const projectName = absolutePath.replace(/[\\/:\s~_]/g, '-');
+  const projectName = encodeProjectName(absolutePath);
 
   // Check if project already exists in config
   const config = await loadProjectConfig();

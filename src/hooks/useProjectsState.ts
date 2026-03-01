@@ -104,7 +104,7 @@ const isUpdateAdditive = (
   );
 };
 
-const VALID_TABS: Set<string> = new Set(['chat', 'files', 'shell', 'git', 'tasks', 'preview']);
+const VALID_TABS: Set<string> = new Set(['dashboard', 'chat', 'files', 'shell', 'git', 'tasks', 'preview']);
 
 const readPersistedTab = (): AppTab => {
   try {
@@ -371,7 +371,7 @@ export function useProjectsState({
     (session: ProjectSession) => {
       setSelectedSession(session);
 
-      if (activeTab === 'tasks' || activeTab === 'preview') {
+      if (activeTab === 'tasks' || activeTab === 'preview' || activeTab === 'dashboard') {
         setActiveTab('chat');
       }
 
@@ -475,6 +475,14 @@ export function useProjectsState({
     }
   }, [selectedProject, selectedSession]);
 
+  const handleOpenDashboard = useCallback(() => {
+    setActiveTab('dashboard');
+    navigate('/');
+    if (isMobile) {
+      setSidebarOpen(false);
+    }
+  }, [isMobile, navigate]);
+
   const handleProjectDelete = useCallback(
     (projectName: string) => {
       if (selectedProject?.name === projectName) {
@@ -501,6 +509,7 @@ export function useProjectsState({
       isLoading: isLoadingProjects,
       loadingProgress,
       onRefresh: handleSidebarRefresh,
+      onOpenDashboard: handleOpenDashboard,
       onShowSettings: () => setShowSettings(true),
       showSettings,
       settingsInitialTab,
@@ -514,6 +523,7 @@ export function useProjectsState({
       handleSessionDelete,
       handleSessionSelect,
       handleSidebarRefresh,
+      handleOpenDashboard,
       isLoadingProjects,
       isMobile,
       loadingProgress,

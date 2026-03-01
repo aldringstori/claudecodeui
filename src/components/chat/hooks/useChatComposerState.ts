@@ -966,6 +966,31 @@ export function useChatComposerState({
     [onInputFocusChange],
   );
 
+  const submitProgrammaticPrompt = useCallback(
+    async (prompt: string) => {
+      const normalizedPrompt = prompt.trim();
+      if (!normalizedPrompt || isLoading || !selectedProject) {
+        return false;
+      }
+
+      setInput(normalizedPrompt);
+      inputValueRef.current = normalizedPrompt;
+
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      }
+
+      if (!handleSubmitRef.current) {
+        return false;
+      }
+
+      await handleSubmitRef.current(createFakeSubmitEvent());
+      return true;
+    },
+    [isLoading, selectedProject],
+  );
+
   return {
     input,
     setInput,
@@ -1010,5 +1035,6 @@ export function useChatComposerState({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
+    submitProgrammaticPrompt,
   };
 }
