@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Check, Plus, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Check, GripVertical, Plus, X } from 'lucide-react';
 import ChatInterface from '../../../chat/view/ChatInterface';
 import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
 import type { SessionLifecycleHandler } from '../../types/types';
@@ -251,6 +251,8 @@ export default function MultiChatWorkspacePanel({
   const [starredProjects, setStarredProjects] = useState<Set<string>>(loadStarredProjects);
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>(readProjectSortOrder);
   const [gridColumns, setGridColumns] = useState<MultiChatGridColumns>(readGridColumnsPreference);
+  const [draggedProjectName, setDraggedProjectName] = useState<string | null>(null);
+  const projectTileRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
     const syncSortPreferences = () => {
@@ -340,8 +342,9 @@ export default function MultiChatWorkspacePanel({
 
   const selectedProjects = useMemo(
     () => {
-      const selectedSet = new Set(selectedProjectNames);
-      return sortedProjects.filter((project) => selectedSet.has(project.name));
+      return selectedProjectNames
+        .map((projectName) => sortedProjects.find((project) => project.name === projectName) || null)
+        .filter((project): project is Project => Boolean(project));
     },
     [selectedProjectNames, sortedProjects],
   );
@@ -357,6 +360,49 @@ export default function MultiChatWorkspacePanel({
     );
   };
 
+  const moveProjectByStep = (projectName: string, step: -1 | 1) => {
+    setSelectedProjectNames((previous) => {
+      const index = previous.indexOf(projectName);
+      if (index < 0) {
+        return previous;
+      }
+
+      const targetIndex = index + step;
+      if (targetIndex < 0 || targetIndex >= previous.length) {
+        return previous;
+      }
+
+      const next = [...previous];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  };
+
+  const moveProjectBeforeTarget = (sourceProjectName: string, targetProjectName: string) => {
+    setSelectedProjectNames((previous) => {
+      const sourceIndex = previous.indexOf(sourceProjectName);
+      const targetIndex = previous.indexOf(targetProjectName);
+
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+        return previous;
+      }
+
+      const next = [...previous];
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const jumpToProjectTile = (projectName: string) => {
+    const tile = projectTileRefs.current[projectName];
+    if (!tile) {
+      return;
+    }
+
+    tile.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+  };
+
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <div className="border-b border-border/60 bg-background/70 px-4 py-3 flex flex-wrap items-center justify-between gap-2">
@@ -365,6 +411,23 @@ export default function MultiChatWorkspacePanel({
           <p className="text-xs text-muted-foreground">
             Open multiple project chats at once. Add or remove projects from the picker.
           </p>
+          {selectedProjects.length > 0 && (
+            <div className="mt-2 overflow-x-auto">
+              <div className="flex items-center gap-3 whitespace-nowrap">
+                {selectedProjects.map((project) => (
+                  <button
+                    key={`jump-${project.name}`}
+                    type="button"
+                    onClick={() => jumpToProjectTile(project.name)}
+                    className="text-xs text-primary underline-offset-2 hover:underline"
+                    title={`Jump to ${project.displayName}`}
+                  >
+                    {project.displayName}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -463,25 +526,82 @@ export default function MultiChatWorkspacePanel({
           </div>
         ) : (
           <div className={`grid ${gridClass} gap-3`}>
-            {selectedProjects.map((project) => (
+            {selectedProjects.map((project, projectIndex) => (
               <section
                 key={project.name}
-                className={`rounded-lg border border-border/60 bg-card overflow-hidden flex flex-col min-h-0 ${tileMinHeightClass}`}
+                ref={(element) => {
+                  projectTileRefs.current[project.name] = element;
+                }}
+                onDragOver={(event) => {
+                  if (!draggedProjectName) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const sourceProjectName = draggedProjectName || event.dataTransfer.getData('text/plain');
+                  if (sourceProjectName && sourceProjectName !== project.name) {
+                    moveProjectBeforeTarget(sourceProjectName, project.name);
+                  }
+                  setDraggedProjectName(null);
+                }}
+                className={`rounded-lg border bg-card overflow-hidden flex flex-col min-h-0 ${tileMinHeightClass} ${
+                  draggedProjectName === project.name ? 'border-primary/60' : 'border-border/60'
+                }`}
               >
                 <header className="relative px-3 py-2 border-b border-border/60 bg-muted/20">
                   <div className="min-w-0 text-center">
                     <h4 className="text-sm font-medium text-foreground truncate">{project.displayName}</h4>
                     <div className="text-[11px] text-muted-foreground truncate">{project.fullPath}</div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleProject(project.name)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                    aria-label={`Remove ${project.displayName}`}
-                    title={`Remove ${project.displayName}`}
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={(event) => {
+                        setDraggedProjectName(project.name);
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', project.name);
+                      }}
+                      onDragEnd={() => setDraggedProjectName(null)}
+                      className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-grab active:cursor-grabbing"
+                      aria-label={`Drag ${project.displayName}`}
+                      title={`Drag ${project.displayName}`}
+                    >
+                      <GripVertical className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveProjectByStep(project.name, -1)}
+                      disabled={projectIndex === 0}
+                      className="p-1 rounded-md text-muted-foreground enabled:hover:text-foreground enabled:hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label={`Move ${project.displayName} up`}
+                      title={`Move ${project.displayName} up`}
+                    >
+                      <ArrowUp className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveProjectByStep(project.name, 1)}
+                      disabled={projectIndex === selectedProjects.length - 1}
+                      className="p-1 rounded-md text-muted-foreground enabled:hover:text-foreground enabled:hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label={`Move ${project.displayName} down`}
+                      title={`Move ${project.displayName} down`}
+                    >
+                      <ArrowDown className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleProject(project.name)}
+                      className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                      aria-label={`Remove ${project.displayName}`}
+                      title={`Remove ${project.displayName}`}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </header>
 
                 <div className="flex-1 min-h-0">
