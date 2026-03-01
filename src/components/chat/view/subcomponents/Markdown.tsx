@@ -129,7 +129,32 @@ const markdownComponents = {
       {children}
     </a>
   ),
-  p: ({ children }: { children?: React.ReactNode }) => <div className="mb-3 last:mb-0 leading-relaxed">{children}</div>,
+  p: ({ children }: { children?: React.ReactNode }) => {
+    // Detect "────── project-name ──────" style separators from Claude terminal output
+    let textContent: string | null = null;
+    if (typeof children === 'string') {
+      textContent = children;
+    } else if (Array.isArray(children) && children.length === 1 && typeof children[0] === 'string') {
+      textContent = children[0];
+    }
+
+    if (textContent) {
+      const hrMatch = textContent.match(/^─+\s*(.+?)\s*─+$/);
+      if (hrMatch) {
+        return (
+          <div className="flex items-center gap-3 my-3">
+            <span className="flex-1 h-px bg-border/60" />
+            <span className="text-xs font-semibold text-muted-foreground/80 shrink-0 tracking-wide">
+              {hrMatch[1].trim()}
+            </span>
+            <span className="flex-1 h-px bg-border/60" />
+          </div>
+        );
+      }
+    }
+
+    return <div className="mb-3 last:mb-0 leading-relaxed">{children}</div>;
+  },
   table: ({ children }: { children?: React.ReactNode }) => (
     <div className="overflow-x-auto my-4 rounded-xl border border-border/50">
       <table className="min-w-full border-collapse">{children}</table>

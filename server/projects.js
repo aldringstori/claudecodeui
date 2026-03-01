@@ -420,6 +420,11 @@ async function hasProjectMarkers(projectPath) {
 }
 
 const PRIMARY_LANGUAGE_MARKERS = [
+  // Android (most specific — local.properties is Android SDK config, unique to Android)
+  { language: 'android', file: 'local.properties', weight: 320 },
+  // React Native Android root manifest
+  { language: 'android', file: 'AndroidManifest.xml', weight: 300 },
+
   // PHP / Laravel
   { language: 'php', file: 'artisan', weight: 260 },
   { language: 'php', file: 'composer.json', weight: 200 },
@@ -444,10 +449,12 @@ const PRIMARY_LANGUAGE_MARKERS = [
   { language: 'ruby', file: 'gemfile', weight: 180 },
   { language: 'ruby', file: 'gemfile.lock', weight: 90 },
 
+  // Kotlin (build.gradle.kts is Kotlin DSL — stronger signal than plain build.gradle)
+  { language: 'kotlin', file: 'build.gradle.kts', weight: 200 },
+
   // Java
   { language: 'java', file: 'pom.xml', weight: 170 },
   { language: 'java', file: 'build.gradle', weight: 150 },
-  { language: 'java', file: 'build.gradle.kts', weight: 150 },
 
   // C#
   { language: 'csharp', file: 'global.json', weight: 130 },
@@ -478,7 +485,9 @@ const EXTENSION_LANGUAGE_MAP = new Map([
   ['.js', 'javascript'],
   ['.jsx', 'javascript'],
   ['.mjs', 'javascript'],
-  ['.cjs', 'javascript']
+  ['.cjs', 'javascript'],
+  ['.kt', 'kotlin'],
+  ['.kts', 'kotlin']
 ]);
 
 const SOURCE_FOLDER_HINTS = [
@@ -539,9 +548,17 @@ async function detectPrimaryLanguage(projectPath) {
         continue;
       }
 
-      if (fileNameSet.has(marker.file)) {
+      if (fileNameSet.has(marker.file.toLowerCase())) {
         addLanguageScore(scores, marker.language, marker.weight);
       }
+    }
+
+    // Directory-based android detection: android/ at root is the React Native / Expo pattern
+    const hasAndroidDir = topLevelEntries.some(
+      (entry) => entry.isDirectory() && entry.name.toLowerCase() === 'android'
+    );
+    if (hasAndroidDir) {
+      addLanguageScore(scores, 'android', 240);
     }
 
     applyLanguageScoresFromEntries(topLevelEntries, scores, 5);
@@ -1040,6 +1057,52 @@ async function enrichProjectsWithAccessUrls(projects) {
     project.port = runtimeCandidate.port;
     project.url = `http://127.0.0.1:${runtimeCandidate.port}`;
     project.runtimeSource = runtimeCandidate.source;
+  }
+}
+
+async function annotateProjectsWithEnvUrl(projects) {
+  if (!Array.isArray(projects) || projects.length === 0) {
+    return;
+  }
+
+  for (const project of projects) {
+    if (!project || typeof project !== 'object') {
+      continue;
+    }
+
+    const projectPath = project.fullPath || project.path;
+    if (typeof projectPath !== 'string' || !projectPath.trim()) {
+      continue;
+    }
+
+    const envPath = path.join(projectPath, '.env');
+    try {
+      const envContent = await fs.readFile(envPath, 'utf8');
+      const envVars = {};
+
+      for (const line of envContent.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) {
+          continue;
+        }
+        const eqIndex = trimmed.indexOf('=');
+        if (eqIndex < 0) {
+          continue;
+        }
+        const key = trimmed.slice(0, eqIndex).trim();
+        const value = trimmed.slice(eqIndex + 1).trim().replace(/^["']|["']$/g, '');
+        envVars[key] = value;
+      }
+
+      if (envVars.APP_URL && envVars.APP_URL.startsWith('http')) {
+        project.configuredUrl = envVars.APP_URL;
+      } else if (envVars.APP_PORT || envVars.PORT || envVars.VITE_PORT) {
+        const port = envVars.APP_PORT || envVars.PORT || envVars.VITE_PORT;
+        project.configuredUrl = `http://localhost:${port}`;
+      }
+    } catch {
+      // .env not present or unreadable — skip
+    }
   }
 }
 
@@ -1684,6 +1747,7 @@ async function getProjects(progressCallback = null) {
   const finalProjects = ensureUniqueDisplayNames(dedupeProjectsByPath(projects));
   await annotateProjectsWithPrimaryLanguage(finalProjects);
   await enrichProjectsWithAccessUrls(finalProjects);
+  await annotateProjectsWithEnvUrl(finalProjects);
   return finalProjects;
 }
 

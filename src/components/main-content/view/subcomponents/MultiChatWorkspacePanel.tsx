@@ -12,6 +12,7 @@ import {
   GripVertical,
   Hexagon,
   Plus,
+  Smartphone,
   Terminal,
   X,
   type LucideIcon,
@@ -37,6 +38,7 @@ type SessionWithProvider = ProjectSession & { __provider: SessionProvider };
 type MultiChatGridColumns = 2 | 3;
 type ProjectAccentStyle = {
   borderClass: string;
+  ringClass: string;
   labelBorderClass: string;
   labelTextClass: string;
   lineClass: string;
@@ -52,6 +54,7 @@ type ProjectLanguageIconConfig = {
 const PROJECT_ACCENTS: ProjectAccentStyle[] = [
   {
     borderClass: 'border-cyan-400/70',
+    ringClass: 'ring-cyan-400/70',
     labelBorderClass: 'border-cyan-400/70',
     labelTextClass: 'text-cyan-500 dark:text-cyan-300',
     lineClass: 'bg-cyan-400/70',
@@ -59,6 +62,7 @@ const PROJECT_ACCENTS: ProjectAccentStyle[] = [
   },
   {
     borderClass: 'border-fuchsia-400/70',
+    ringClass: 'ring-fuchsia-400/70',
     labelBorderClass: 'border-fuchsia-400/70',
     labelTextClass: 'text-fuchsia-500 dark:text-fuchsia-300',
     lineClass: 'bg-fuchsia-400/70',
@@ -66,6 +70,7 @@ const PROJECT_ACCENTS: ProjectAccentStyle[] = [
   },
   {
     borderClass: 'border-emerald-400/70',
+    ringClass: 'ring-emerald-400/70',
     labelBorderClass: 'border-emerald-400/70',
     labelTextClass: 'text-emerald-500 dark:text-emerald-300',
     lineClass: 'bg-emerald-400/70',
@@ -73,6 +78,7 @@ const PROJECT_ACCENTS: ProjectAccentStyle[] = [
   },
   {
     borderClass: 'border-amber-400/70',
+    ringClass: 'ring-amber-400/70',
     labelBorderClass: 'border-amber-400/70',
     labelTextClass: 'text-amber-600 dark:text-amber-300',
     lineClass: 'bg-amber-400/70',
@@ -80,6 +86,7 @@ const PROJECT_ACCENTS: ProjectAccentStyle[] = [
   },
   {
     borderClass: 'border-violet-400/70',
+    ringClass: 'ring-violet-400/70',
     labelBorderClass: 'border-violet-400/70',
     labelTextClass: 'text-violet-500 dark:text-violet-300',
     lineClass: 'bg-violet-400/70',
@@ -87,6 +94,7 @@ const PROJECT_ACCENTS: ProjectAccentStyle[] = [
   },
   {
     borderClass: 'border-rose-400/70',
+    ringClass: 'ring-rose-400/70',
     labelBorderClass: 'border-rose-400/70',
     labelTextClass: 'text-rose-500 dark:text-rose-300',
     lineClass: 'bg-rose-400/70',
@@ -104,6 +112,8 @@ const LANGUAGE_ICON_BY_NAME: Record<string, ProjectLanguageIconConfig> = {
   ruby: { label: 'Ruby', icon: Gem, colorClass: 'text-rose-500 dark:text-rose-300' },
   java: { label: 'Java', icon: Coffee, colorClass: 'text-red-500 dark:text-red-300' },
   csharp: { label: 'C#', icon: Hexagon, colorClass: 'text-purple-500 dark:text-purple-300' },
+  kotlin: { label: 'Kotlin', icon: Hexagon, colorClass: 'text-violet-500 dark:text-violet-300' },
+  android: { label: 'Android', icon: Smartphone, colorClass: 'text-green-500 dark:text-green-300' },
   unknown: { label: 'Code', icon: FileCode2, colorClass: 'text-muted-foreground' },
 };
 
@@ -967,6 +977,9 @@ export default function MultiChatWorkspacePanel({
               const accentStyle = getProjectAccent(project.name);
               const languageIconConfig = getProjectLanguageIcon(project);
               const HeaderLanguageIcon = languageIconConfig.icon;
+              const outlineClass = draggedProjectName === project.name
+                ? 'border-primary/70 ring-primary/70'
+                : `${accentStyle.borderClass} ${accentStyle.ringClass}`;
 
               return (
                 <section
@@ -989,14 +1002,14 @@ export default function MultiChatWorkspacePanel({
                     }
                     setDraggedProjectName(null);
                   }}
-                  className={`relative isolate z-0 rounded-xl border bg-card overflow-visible flex flex-col min-h-0 ${tileHeightClass} ${
-                    draggedProjectName === project.name ? 'border-primary/70' : accentStyle.borderClass
-                  } ${accentStyle.glowClass}`}
+                  className={`relative isolate z-0 rounded-xl border-[1.5px] ring-[1.5px] ring-inset bg-card overflow-visible flex flex-col min-h-0 ${tileHeightClass} ${outlineClass} ${accentStyle.glowClass}`}
                 >
+                  <div className="pointer-events-none absolute top-0 left-1/2 z-[85] h-[3px] w-20 -translate-x-1/2 -translate-y-1/2 bg-background" />
+
                   <div className="pointer-events-none absolute top-0 left-1/2 z-[90] w-[84%] -translate-x-1/2 -translate-y-1/2 flex items-center gap-2">
                     <span className={`relative z-0 h-px flex-1 ${accentStyle.lineClass}`} />
                     <span
-                      className={`relative z-10 bg-card px-2.5 py-0.5 text-[11px] font-semibold leading-normal ${accentStyle.labelTextClass} max-w-[65%] truncate`}
+                      className={`relative z-10 px-2.5 py-0.5 text-[11px] font-semibold leading-normal ${accentStyle.labelTextClass} max-w-[65%] truncate pointer-events-auto select-text cursor-text`}
                       title={project.displayName}
                     >
                       {project.displayName}
@@ -1016,6 +1029,18 @@ export default function MultiChatWorkspacePanel({
                     </div>
                     <div className="min-w-0 text-center">
                       <div className="text-[11px] text-muted-foreground truncate">{project.fullPath}</div>
+                      {(project.url || project.configuredUrl) && (
+                        <a
+                          href={String(project.url || project.configuredUrl)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-primary/70 hover:text-primary truncate block leading-tight"
+                          title={String(project.url || project.configuredUrl)}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {String(project.url || project.configuredUrl)}
+                        </a>
+                      )}
                     </div>
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       <button
