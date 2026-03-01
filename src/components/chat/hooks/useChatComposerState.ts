@@ -20,6 +20,7 @@ import type {
   ChatMessage,
   PendingPermissionRequest,
   PermissionMode,
+  QueuedMessage,
 } from '../types/types';
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
@@ -126,6 +127,11 @@ export function useChatComposerState({
   const [imageErrors, setImageErrors] = useState<Map<string, string>>(new Map());
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
   const [thinkingMode, setThinkingMode] = useState('none');
+  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
+
+  const queueRef = useRef<QueuedMessage[]>([]);
+  const isProcessingQueueRef = useRef(false);
+  queueRef.current = messageQueue;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputHighlightRef = useRef<HTMLDivElement>(null);
@@ -470,48 +476,14 @@ export function useChatComposerState({
     noKeyboard: true,
   });
 
-  const handleSubmit = useCallback(
-    async (
-      event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
-    ) => {
-      event.preventDefault();
-      const currentInput = inputValueRef.current;
-      if (!currentInput.trim() || isLoading || !selectedProject) {
-        return;
-      }
-
-      // Intercept slash commands: if input starts with /commandName, execute as command with args
-      const trimmedInput = currentInput.trim();
-      if (trimmedInput.startsWith('/')) {
-        const firstSpace = trimmedInput.indexOf(' ');
-        const commandName = firstSpace > 0 ? trimmedInput.slice(0, firstSpace) : trimmedInput;
-        const matchedCommand = slashCommands.find((cmd: SlashCommand) => cmd.name === commandName);
-        if (matchedCommand) {
-          executeCommand(matchedCommand, trimmedInput);
-          setInput('');
-          inputValueRef.current = '';
-          setAttachedImages([]);
-          setUploadingImages(new Map());
-          setImageErrors(new Map());
-          resetCommandMenuState();
-          setIsTextareaExpanded(false);
-          if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-          }
-          return;
-        }
-      }
-
-      let messageContent = currentInput;
-      const selectedThinkingMode = thinkingModes.find((mode: { id: string; prefix?: string }) => mode.id === thinkingMode);
-      if (selectedThinkingMode && selectedThinkingMode.prefix) {
-        messageContent = `${selectedThinkingMode.prefix}: ${currentInput}`;
-      }
+  const executeSend = useCallback(
+    async (messageContent: string, displayContent: string, images: File[]) => {
+      if (!selectedProject) return;
 
       let uploadedImages: unknown[] = [];
-      if (attachedImages.length > 0) {
+      if (images.length > 0) {
         const formData = new FormData();
-        attachedImages.forEach((file) => {
+        images.forEach((file) => {
           formData.append('images', file);
         });
 
@@ -545,7 +517,7 @@ export function useChatComposerState({
 
       const userMessage: ChatMessage = {
         type: 'user',
-        content: currentInput,
+        content: displayContent,
         images: uploadedImages as any,
         timestamp: new Date(),
       };
@@ -568,7 +540,6 @@ export function useChatComposerState({
 
       if (!effectiveSessionId && !selectedSession?.id) {
         if (typeof window !== 'undefined') {
-          // Reset stale pending IDs from previous interrupted runs before creating a new one.
           sessionStorage.removeItem('pendingSessionId');
         }
         pendingViewSessionRef.current = { sessionId: null, startedAt: Date.now() };
@@ -678,6 +649,94 @@ export function useChatComposerState({
           },
         });
       }
+    },
+    [
+      claudeModel,
+      codexModel,
+      currentSessionId,
+      cursorModel,
+      geminiModel,
+      onSessionActive,
+      onSessionProcessing,
+      pendingViewSessionRef,
+      permissionMode,
+      provider,
+      scrollToBottom,
+      selectedProject,
+      selectedSession?.id,
+      sendMessage,
+      setCanAbortSession,
+      setChatMessages,
+      setClaudeStatus,
+      setIsLoading,
+      setIsUserScrolledUp,
+    ],
+  );
+
+  const handleSubmit = useCallback(
+    async (
+      event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
+    ) => {
+      event.preventDefault();
+      const currentInput = inputValueRef.current;
+      if (!currentInput.trim() || !selectedProject) {
+        return;
+      }
+
+      // Intercept slash commands: if input starts with /commandName, execute as command with args
+      const trimmedInput = currentInput.trim();
+      if (trimmedInput.startsWith('/')) {
+        const firstSpace = trimmedInput.indexOf(' ');
+        const commandName = firstSpace > 0 ? trimmedInput.slice(0, firstSpace) : trimmedInput;
+        const matchedCommand = slashCommands.find((cmd: SlashCommand) => cmd.name === commandName);
+        if (matchedCommand) {
+          executeCommand(matchedCommand, trimmedInput);
+          setInput('');
+          inputValueRef.current = '';
+          setAttachedImages([]);
+          setUploadingImages(new Map());
+          setImageErrors(new Map());
+          resetCommandMenuState();
+          setIsTextareaExpanded(false);
+          if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+          }
+          return;
+        }
+      }
+
+      let messageContent = currentInput;
+      const selectedThinkingMode = thinkingModes.find((mode: { id: string; prefix?: string }) => mode.id === thinkingMode);
+      if (selectedThinkingMode && selectedThinkingMode.prefix) {
+        messageContent = `${selectedThinkingMode.prefix}: ${currentInput}`;
+      }
+
+      // If a task is already running, queue the message instead of sending
+      if (isLoading) {
+        const queued: QueuedMessage = {
+          id: `queue-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          content: currentInput,
+          messageContent,
+          images: [...attachedImages],
+          timestamp: new Date(),
+        };
+        setMessageQueue((previous) => [...previous, queued]);
+        setInput('');
+        inputValueRef.current = '';
+        setAttachedImages([]);
+        setUploadingImages(new Map());
+        setImageErrors(new Map());
+        setIsTextareaExpanded(false);
+        setThinkingMode('none');
+        resetCommandMenuState();
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+        safeLocalStorage.removeItem(`draft_input_${selectedProject.name}`);
+        return;
+      }
+
+      await executeSend(messageContent, currentInput, attachedImages);
 
       setInput('');
       inputValueRef.current = '';
@@ -696,28 +755,11 @@ export function useChatComposerState({
     },
     [
       attachedImages,
-      claudeModel,
-      codexModel,
-      currentSessionId,
-      cursorModel,
       executeCommand,
-      geminiModel,
+      executeSend,
       isLoading,
-      onSessionActive,
-      onSessionProcessing,
-      pendingViewSessionRef,
-      permissionMode,
-      provider,
       resetCommandMenuState,
-      scrollToBottom,
       selectedProject,
-      selectedSession?.id,
-      sendMessage,
-      setCanAbortSession,
-      setChatMessages,
-      setClaudeStatus,
-      setIsLoading,
-      setIsUserScrolledUp,
       slashCommands,
       thinkingMode,
     ],
@@ -773,6 +815,25 @@ export function useChatComposerState({
     textareaRef.current.style.height = 'auto';
     setIsTextareaExpanded(false);
   }, [input]);
+
+  // Clear the queue when the user switches to a different project
+  useEffect(() => {
+    setMessageQueue([]);
+    queueRef.current = [];
+  }, [selectedProject?.name]);
+
+  // When loading finishes, automatically process the next queued message
+  useEffect(() => {
+    if (!isLoading && queueRef.current.length > 0 && !isProcessingQueueRef.current) {
+      isProcessingQueueRef.current = true;
+      const [next, ...rest] = queueRef.current;
+      queueRef.current = rest;
+      setMessageQueue(rest);
+      executeSend(next.messageContent, next.content, next.images).finally(() => {
+        isProcessingQueueRef.current = false;
+      });
+    }
+  }, [isLoading, executeSend]);
 
   const handleInputChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -1048,5 +1109,8 @@ export function useChatComposerState({
     handleInputFocusChange,
     isInputFocused,
     submitProgrammaticPrompt,
+    messageQueue,
+    removeQueuedMessage: (id: string) => setMessageQueue((previous) => previous.filter((m) => m.id !== id)),
+    clearMessageQueue: () => setMessageQueue([]),
   };
 }

@@ -91,6 +91,14 @@ export interface Question {
   multiSelect?: boolean;
 }
 
+export interface QueuedMessage {
+  id: string;
+  content: string;
+  messageContent: string;
+  images: File[];
+  timestamp: Date;
+}
+
 export interface ChatInterfaceProps {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;

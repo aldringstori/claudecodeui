@@ -17,7 +17,7 @@ import type {
   SetStateAction,
   TouchEvent,
 } from 'react';
-import type { PendingPermissionRequest, PermissionMode, Provider } from '../../types/types';
+import type { PendingPermissionRequest, PermissionMode, Provider, QueuedMessage } from '../../types/types';
 
 interface MentionableFile {
   name: string;
@@ -92,6 +92,9 @@ interface ChatComposerProps {
   isTextareaExpanded: boolean;
   sendByCtrlEnter?: boolean;
   onTranscript: (text: string) => void;
+  messageQueue: QueuedMessage[];
+  removeQueuedMessage: (id: string) => void;
+  clearMessageQueue: () => void;
 }
 
 export default function ChatComposer({
@@ -149,6 +152,9 @@ export default function ChatComposer({
   isTextareaExpanded,
   sendByCtrlEnter,
   onTranscript,
+  messageQueue,
+  removeQueuedMessage,
+  clearMessageQueue,
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
   const textareaRect = textareaRef.current?.getBoundingClientRect();
@@ -204,6 +210,37 @@ export default function ChatComposer({
           onScrollToBottom={onScrollToBottom}
         />}
       </div>
+
+      {messageQueue.length > 0 && !hasQuestionPanel && (
+        <div className="max-w-4xl mx-auto mb-2 bg-amber-500/10 border border-amber-500/30 rounded-xl p-2">
+          <div className="flex items-center justify-between mb-1 px-1">
+            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+              {messageQueue.length} {messageQueue.length > 1 ? t('input.messagesQueued', { defaultValue: 'messages queued' }) : t('input.messageQueued', { defaultValue: 'message queued' })}
+            </span>
+            <button
+              type="button"
+              onClick={clearMessageQueue}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {t('input.clearAll', { defaultValue: 'Clear all' })}
+            </button>
+          </div>
+          {messageQueue.map((msg) => (
+            <div key={msg.id} className="flex items-start gap-2 px-1 py-0.5 text-xs text-muted-foreground">
+              <span className="text-amber-500 mt-0.5 shrink-0">▶</span>
+              <span className="flex-1 truncate">{msg.content}</span>
+              <button
+                type="button"
+                onClick={() => removeQueuedMessage(msg.id)}
+                className="shrink-0 hover:text-foreground transition-colors leading-none"
+                aria-label="Remove queued message"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!hasQuestionPanel && <form onSubmit={onSubmit as (event: FormEvent<HTMLFormElement>) => void} className="relative max-w-4xl mx-auto">
         {isDragActive && (
@@ -301,8 +338,7 @@ export default function ChatComposer({
               onBlur={() => onInputFocusChange?.(false)}
               onInput={onTextareaInput}
               placeholder={placeholder}
-              disabled={isLoading}
-              className="chat-input-placeholder block w-full pl-14 pr-24 sm:pr-48 py-3 sm:py-5 bg-transparent rounded-2xl focus:outline-none text-foreground placeholder-muted-foreground/30 disabled:opacity-50 resize-none min-h-[56px] sm:min-h-[88px] max-h-[40vh] sm:max-h-[350px] overflow-y-auto text-base leading-relaxed transition-all duration-300"
+              className="chat-input-placeholder block w-full pl-14 pr-24 sm:pr-48 py-3 sm:py-5 bg-transparent rounded-2xl focus:outline-none text-foreground placeholder-muted-foreground/30 resize-none min-h-[56px] sm:min-h-[88px] max-h-[40vh] sm:max-h-[350px] overflow-y-auto text-base leading-relaxed transition-all duration-300"
               style={{ height: '56px' }}
             />
 
@@ -324,7 +360,7 @@ export default function ChatComposer({
 
             <button
               type="submit"
-              disabled={!input.trim() || isLoading}
+              disabled={!input.trim()}
               onMouseDown={(event) => {
                 event.preventDefault();
                 onSubmit(event);
@@ -333,11 +369,22 @@ export default function ChatComposer({
                 event.preventDefault();
                 onSubmit(event);
               }}
-              className="absolute right-3 top-[28px] transform -translate-y-1/2 w-11 h-11 sm:w-12 sm:h-12 bg-primary hover:bg-primary/90 text-primary-foreground disabled:bg-muted/40 disabled:text-muted-foreground/40 disabled:cursor-not-allowed rounded-xl flex items-center justify-center shadow-lg shadow-primary/20 transition-all duration-300 active:scale-95 focus:outline-none focus:ring-4 focus:ring-primary/20"
+              className={`absolute right-3 top-[28px] transform -translate-y-1/2 w-11 h-11 sm:w-12 sm:h-12 text-primary-foreground disabled:bg-muted/40 disabled:text-muted-foreground/40 disabled:cursor-not-allowed rounded-xl flex items-center justify-center shadow-lg transition-all duration-300 active:scale-95 focus:outline-none focus:ring-4 focus:ring-primary/20 ${
+                isLoading && input.trim()
+                  ? 'bg-amber-500 hover:bg-amber-400 shadow-amber-500/20'
+                  : 'bg-primary hover:bg-primary/90 shadow-primary/20'
+              }`}
+              title={isLoading && input.trim() ? t('input.queueMessage', { defaultValue: 'Queue message' }) : undefined}
             >
-              <svg className="w-5 h-5 sm:w-6 sm:h-6 transform rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
+              {isLoading && input.trim() ? (
+                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 sm:w-6 sm:h-6 transform rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              )}
             </button>
 
             <div

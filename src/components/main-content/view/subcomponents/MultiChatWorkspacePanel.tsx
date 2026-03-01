@@ -67,21 +67,11 @@ function readGridColumnsPreference(): MultiChatGridColumns {
   }
 }
 
-function getTileMinHeightClass(projectCount: number, gridColumns: MultiChatGridColumns): string {
+function getTileHeightClass(gridColumns: MultiChatGridColumns): string {
   if (gridColumns === 3) {
-    if (projectCount <= 3) {
-      return 'min-h-[500px]';
-    }
-    return 'min-h-[420px]';
+    return 'h-[520px]';
   }
-
-  if (projectCount <= 2) {
-    return 'min-h-[540px]';
-  }
-  if (projectCount <= 4) {
-    return 'min-h-[500px]';
-  }
-  return 'min-h-[440px]';
+  return 'h-[620px]';
 }
 
 function loadStarredProjects(): Set<string> {
@@ -684,7 +674,7 @@ export default function MultiChatWorkspacePanel({
   );
 
   const gridClass = getGridClassByPreference(gridColumns) || getGridClass(selectedProjects.length);
-  const tileMinHeightClass = getTileMinHeightClass(selectedProjects.length, gridColumns);
+  const tileHeightClass = getTileHeightClass(gridColumns);
 
   const toggleProject = (projectName: string) => {
     setSelectedProjectNames((previous) =>
@@ -888,7 +878,7 @@ export default function MultiChatWorkspacePanel({
                   }
                   setDraggedProjectName(null);
                 }}
-                className={`rounded-lg border bg-card overflow-hidden flex flex-col min-h-0 ${tileMinHeightClass} ${
+                className={`rounded-lg border bg-card overflow-hidden flex flex-col min-h-0 ${tileHeightClass} ${
                   draggedProjectName === project.name ? 'border-primary/60' : 'border-border/60'
                 }`}
               >

@@ -177,6 +177,9 @@ function ChatInterface({
     handleInputFocusChange,
     isInputFocused,
     submitProgrammaticPrompt,
+    messageQueue,
+    removeQueuedMessage,
+    clearMessageQueue,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -428,6 +431,9 @@ function ChatInterface({
             isTextareaExpanded={isTextareaExpanded}
             sendByCtrlEnter={sendByCtrlEnter}
             onTranscript={handleTranscript}
+            messageQueue={messageQueue}
+            removeQueuedMessage={removeQueuedMessage}
+            clearMessageQueue={clearMessageQueue}
           />
         </div>
 
