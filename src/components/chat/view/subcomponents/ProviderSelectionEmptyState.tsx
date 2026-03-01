@@ -45,14 +45,6 @@ const PROVIDERS: ProviderDef[] = [
     check: 'bg-primary text-primary-foreground',
   },
   {
-    id: 'cursor',
-    name: 'Cursor',
-    infoKey: 'providerSelection.providerInfo.cursorEditor',
-    accent: 'border-violet-500 dark:border-violet-400',
-    ring: 'ring-violet-500/15',
-    check: 'bg-violet-500 text-white',
-  },
-  {
     id: 'codex',
     name: 'Codex',
     infoKey: 'providerSelection.providerInfo.openai',
@@ -67,6 +59,14 @@ const PROVIDERS: ProviderDef[] = [
     accent: 'border-blue-500 dark:border-blue-400',
     ring: 'ring-blue-500/15',
     check: 'bg-blue-500 text-white',
+  },
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    infoKey: 'providerSelection.providerInfo.cursorEditor',
+    accent: 'border-violet-500 dark:border-violet-400',
+    ring: 'ring-violet-500/15',
+    check: 'bg-violet-500 text-white',
   },
 ];
 
