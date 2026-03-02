@@ -26,6 +26,7 @@ import FileTree from '../../../file-tree/view/FileTree';
 import { useEditorSidebar } from '../../../code-editor/hooks/useEditorSidebar';
 import EditorSidebar from '../../../code-editor/view/EditorSidebar';
 import StandaloneShell from '../../../standalone-shell/view/StandaloneShell';
+import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 
 const MULTI_CHAT_STORAGE_KEY = 'multichat-selected-projects';
 const MULTI_CHAT_GRID_COLUMNS_KEY = 'multichat-grid-columns';
@@ -33,6 +34,7 @@ const STARRED_PROJECTS_STORAGE_KEY = 'starredProjects';
 const CLAUDE_SETTINGS_STORAGE_KEY = 'claude-settings';
 const MULTI_CHAT_SELECTED_PROJECTS_KEY = 'multiChatSelectedProjects';
 const MULTI_CHAT_SELECTED_SESSIONS_KEY = 'multiChatSelectedSessionsByProject';
+const UI_PREFERENCES_PROVIDER_KEY = 'providerByProject';
 const MULTI_CHAT_GIT_PROJECT_KEY_SEPARATOR = '\u001f';
 
 type ProjectSortOrder = 'name' | 'date';
@@ -84,6 +86,48 @@ type ProjectGitHeaderSummary = {
   hasUpstream: boolean;
   error: string | null;
 };
+
+function isSessionProvider(value: unknown): value is SessionProvider {
+  return value === 'claude' || value === 'cursor' || value === 'codex' || value === 'gemini';
+}
+
+function areProviderMapsEqual(
+  previous: Record<string, SessionProvider>,
+  next: Record<string, SessionProvider>,
+): boolean {
+  const previousEntries = Object.entries(previous);
+  const nextEntries = Object.entries(next);
+
+  if (previousEntries.length !== nextEntries.length) {
+    return false;
+  }
+
+  return previousEntries.every(([projectName, provider]) => next[projectName] === provider);
+}
+
+function getSessionProviderById(project: Project, sessionId: string | null): SessionProvider | null {
+  if (!sessionId) {
+    return null;
+  }
+
+  if (project.sessions?.some((session) => session.id === sessionId)) {
+    return 'claude';
+  }
+
+  if (project.cursorSessions?.some((session) => session.id === sessionId)) {
+    return 'cursor';
+  }
+
+  if (project.codexSessions?.some((session) => session.id === sessionId)) {
+    return 'codex';
+  }
+
+  if (project.geminiSessions?.some((session) => session.id === sessionId)) {
+    return 'gemini';
+  }
+
+  return null;
+}
 
 const PROJECT_ACCENTS: ProjectAccentStyle[] = [
   {
@@ -640,6 +684,7 @@ export default function MultiChatWorkspacePanel({
   const [languageFilter, setLanguageFilter] = useState<string | null>(null);
   const [draggedProjectName, setDraggedProjectName] = useState<string | null>(null);
   const [gitSummaryByProject, setGitSummaryByProject] = useState<Record<string, ProjectGitHeaderSummary>>({});
+  const [providerByProject, setProviderByProject] = useState<Record<string, SessionProvider>>({});
   const projectTileRefs = useRef<Record<string, HTMLElement | null>>({});
   const [hasLoadedServerPreferences, setHasLoadedServerPreferences] = useState(false);
 
@@ -677,7 +722,7 @@ export default function MultiChatWorkspacePanel({
     const loadServerPreferences = async () => {
       try {
         const response = await authenticatedFetch(
-          `/api/user/ui-preferences?keys=${MULTI_CHAT_SELECTED_PROJECTS_KEY},${MULTI_CHAT_SELECTED_SESSIONS_KEY}`,
+          `/api/user/ui-preferences?keys=${MULTI_CHAT_SELECTED_PROJECTS_KEY},${MULTI_CHAT_SELECTED_SESSIONS_KEY},${UI_PREFERENCES_PROVIDER_KEY}`,
         );
         if (!response.ok) {
           throw new Error(`Failed to load multi-chat preferences (${response.status})`);
@@ -689,6 +734,7 @@ export default function MultiChatWorkspacePanel({
         const preferences = payload.preferences || {};
         const projectNames = preferences[MULTI_CHAT_SELECTED_PROJECTS_KEY];
         const sessionMap = preferences[MULTI_CHAT_SELECTED_SESSIONS_KEY];
+        const providerMap = preferences[UI_PREFERENCES_PROVIDER_KEY];
 
         if (!cancelled && Array.isArray(projectNames)) {
           const normalizedProjectNames = projectNames.filter(
@@ -714,6 +760,21 @@ export default function MultiChatWorkspacePanel({
             setSelectedSessionIdsByProject(normalizedSessionMap);
           }
         }
+
+        if (!cancelled && providerMap && typeof providerMap === 'object' && !Array.isArray(providerMap)) {
+          const normalizedProviderMap = Object.fromEntries(
+            Object.entries(providerMap as Record<string, unknown>).filter(
+              ([projectName, provider]) =>
+                typeof projectName === 'string' &&
+                projectName.length > 0 &&
+                isSessionProvider(provider),
+            ),
+          ) as Record<string, SessionProvider>;
+
+          setProviderByProject((previous) => (
+            areProviderMapsEqual(previous, normalizedProviderMap) ? previous : normalizedProviderMap
+          ));
+        }
       } catch (error) {
         console.warn('Unable to load multi-chat preferences:', error);
       } finally {
@@ -727,6 +788,68 @@ export default function MultiChatWorkspacePanel({
 
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let currentController: AbortController | null = null;
+
+    const refreshProviderMap = async () => {
+      currentController?.abort();
+      const controller = new AbortController();
+      currentController = controller;
+
+      try {
+        const response = await authenticatedFetch(
+          `/api/user/ui-preferences?keys=${UI_PREFERENCES_PROVIDER_KEY}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = await response.json() as {
+          preferences?: Record<string, unknown>;
+        };
+        if (controller.signal.aborted || cancelled) {
+          return;
+        }
+
+        const providerMap = payload.preferences?.[UI_PREFERENCES_PROVIDER_KEY];
+        if (!providerMap || typeof providerMap !== 'object' || Array.isArray(providerMap)) {
+          return;
+        }
+
+        const normalizedProviderMap = Object.fromEntries(
+          Object.entries(providerMap as Record<string, unknown>).filter(
+            ([projectName, provider]) =>
+              typeof projectName === 'string' &&
+              projectName.length > 0 &&
+              isSessionProvider(provider),
+          ),
+        ) as Record<string, SessionProvider>;
+
+        setProviderByProject((previous) => (
+          areProviderMapsEqual(previous, normalizedProviderMap) ? previous : normalizedProviderMap
+        ));
+      } catch (error) {
+        if (controller.signal.aborted || cancelled || (error instanceof DOMException && error.name === 'AbortError')) {
+          return;
+        }
+        console.warn('Unable to refresh provider preferences:', error);
+      }
+    };
+
+    void refreshProviderMap();
+    const intervalId = window.setInterval(() => {
+      void refreshProviderMap();
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      currentController?.abort();
+      window.clearInterval(intervalId);
     };
   }, []);
 
@@ -1209,6 +1332,11 @@ export default function MultiChatWorkspacePanel({
               const languageIconConfig = getProjectLanguageIcon(project);
               const HeaderLanguageIcon = languageIconConfig.icon;
               const gitSummary = gitSummaryByProject[project.name];
+              const activeSessionId = selectedSessionIdsByProject[project.name] || null;
+              const activeProvider =
+                getSessionProviderById(project, activeSessionId) ||
+                providerByProject[project.name] ||
+                'claude';
               const outlineClass = draggedProjectName === project.name
                 ? 'border-primary/70 ring-primary/70'
                 : `${accentStyle.borderClass} ${accentStyle.ringClass}`;
@@ -1259,7 +1387,7 @@ export default function MultiChatWorkspacePanel({
                         <HeaderLanguageIcon className={`h-3.5 w-3.5 ${languageIconConfig.colorClass}`} />
                       </div>
                     </div>
-                    <div className="min-w-0 pl-9 pr-52">
+                    <div className="min-w-0 pl-9 pr-80">
                       <div className="inline-flex items-center gap-1.5 max-w-full overflow-hidden">
                         <div className="text-[11px] text-muted-foreground truncate max-w-[55%]">
                           {project.fullPath}
@@ -1278,8 +1406,31 @@ export default function MultiChatWorkspacePanel({
                         )}
                       </div>
                     </div>
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                      <div className="mr-1 inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/80 px-1.5 py-1 text-[10px] leading-none text-muted-foreground">
+                    <div className="absolute right-[7.5rem] top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-auto">
+                      <div
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/80"
+                        title={`Active AI: ${
+                          activeProvider === 'codex'
+                            ? 'GPT'
+                            : activeProvider === 'gemini'
+                              ? 'Gemini'
+                              : activeProvider === 'cursor'
+                                ? 'Cursor'
+                                : 'Claude'
+                        }`}
+                        aria-label={`Active AI: ${
+                          activeProvider === 'codex'
+                            ? 'GPT'
+                            : activeProvider === 'gemini'
+                              ? 'Gemini'
+                              : activeProvider === 'cursor'
+                                ? 'Cursor'
+                                : 'Claude'
+                        }`}
+                      >
+                        <SessionProviderLogo provider={activeProvider} className="h-4 w-4" />
+                      </div>
+                      <div className="inline-flex max-w-[180px] shrink-0 items-center gap-1 rounded-md border border-border/60 bg-background/80 px-1.5 py-1 text-[10px] leading-none text-muted-foreground">
                         {gitSummary?.isLoading ? (
                           <span className="text-[10px] font-medium">Git...</span>
                         ) : gitSummary?.error ? (
@@ -1328,6 +1479,8 @@ export default function MultiChatWorkspacePanel({
                           </>
                         )}
                       </div>
+                    </div>
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-auto">
                       <button
                         type="button"
                         draggable
