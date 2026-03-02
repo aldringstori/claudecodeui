@@ -166,13 +166,30 @@ router.get('/status', async (req, res) => {
       }
     });
 
+    // Get insertions / deletions vs HEAD (staged + unstaged combined)
+    let insertions = 0;
+    let deletions = 0;
+    if (hasCommits) {
+      try {
+        const { stdout: shortstat } = await execAsync('git diff HEAD --shortstat', { cwd: projectPath });
+        const insMatch = shortstat.match(/(\d+) insertion/);
+        const delMatch = shortstat.match(/(\d+) deletion/);
+        insertions = insMatch ? parseInt(insMatch[1], 10) : 0;
+        deletions = delMatch ? parseInt(delMatch[1], 10) : 0;
+      } catch {
+        // shortstat might fail if working tree is clean or no commits
+      }
+    }
+
     res.json({
       branch,
       hasCommits,
       modified,
       added,
       deleted,
-      untracked
+      untracked,
+      insertions,
+      deletions,
     });
   } catch (error) {
     console.error('Git status error:', error);

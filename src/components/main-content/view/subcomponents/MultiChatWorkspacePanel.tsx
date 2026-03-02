@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -8,6 +8,7 @@ import {
   Coffee,
   FileCode2,
   FolderOpen,
+  GitBranch,
   Gem,
   GripVertical,
   Hexagon,
@@ -32,10 +33,11 @@ const STARRED_PROJECTS_STORAGE_KEY = 'starredProjects';
 const CLAUDE_SETTINGS_STORAGE_KEY = 'claude-settings';
 const MULTI_CHAT_SELECTED_PROJECTS_KEY = 'multiChatSelectedProjects';
 const MULTI_CHAT_SELECTED_SESSIONS_KEY = 'multiChatSelectedSessionsByProject';
+const MULTI_CHAT_GIT_PROJECT_KEY_SEPARATOR = '\u001f';
 
 type ProjectSortOrder = 'name' | 'date';
 type SessionWithProvider = ProjectSession & { __provider: SessionProvider };
-type MultiChatGridColumns = 2 | 3;
+type MultiChatGridColumns = 2 | 3 | 4;
 type ProjectAccentStyle = {
   borderClass: string;
   ringClass: string;
@@ -49,6 +51,38 @@ type ProjectLanguageIconConfig = {
   label: string;
   icon: LucideIcon;
   colorClass: string;
+};
+
+type GitStatusSummaryResponse = {
+  branch?: string;
+  modified?: string[];
+  added?: string[];
+  deleted?: string[];
+  untracked?: string[];
+  insertions?: number;
+  deletions?: number;
+  error?: string;
+};
+
+type GitRemoteSummaryResponse = {
+  hasRemote?: boolean;
+  hasUpstream?: boolean;
+  ahead?: number;
+  behind?: number;
+  error?: string;
+};
+
+type ProjectGitHeaderSummary = {
+  isLoading: boolean;
+  branch: string | null;
+  changedCount: number;
+  insertions: number;
+  deletions: number;
+  aheadCount: number;
+  behindCount: number;
+  hasRemote: boolean;
+  hasUpstream: boolean;
+  error: string | null;
 };
 
 const PROJECT_ACCENTS: ProjectAccentStyle[] = [
@@ -114,6 +148,7 @@ const LANGUAGE_ICON_BY_NAME: Record<string, ProjectLanguageIconConfig> = {
   csharp: { label: 'C#', icon: Hexagon, colorClass: 'text-purple-500 dark:text-purple-300' },
   kotlin: { label: 'Kotlin', icon: Hexagon, colorClass: 'text-violet-500 dark:text-violet-300' },
   android: { label: 'Android', icon: Smartphone, colorClass: 'text-green-500 dark:text-green-300' },
+  bash: { label: 'Bash', icon: Terminal, colorClass: 'text-orange-500 dark:text-orange-300' },
   unknown: { label: 'Code', icon: FileCode2, colorClass: 'text-muted-foreground' },
 };
 
@@ -170,22 +205,25 @@ function getGridClass(projectCount: number): string {
 }
 
 function getGridClassByPreference(gridColumns: MultiChatGridColumns): string {
-  return gridColumns === 3 ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2';
+  if (gridColumns === 4) return 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4';
+  if (gridColumns === 3) return 'grid-cols-1 lg:grid-cols-3';
+  return 'grid-cols-1 lg:grid-cols-2';
 }
 
 function readGridColumnsPreference(): MultiChatGridColumns {
   try {
     const raw = localStorage.getItem(MULTI_CHAT_GRID_COLUMNS_KEY);
-    return raw === '3' ? 3 : 2;
+    if (raw === '3') return 3;
+    if (raw === '4') return 4;
+    return 2;
   } catch {
     return 2;
   }
 }
 
 function getTileHeightClass(gridColumns: MultiChatGridColumns): string {
-  if (gridColumns === 3) {
-    return 'h-[520px]';
-  }
+  if (gridColumns === 4) return 'h-[460px]';
+  if (gridColumns === 3) return 'h-[520px]';
   return 'h-[620px]';
 }
 
@@ -599,7 +637,9 @@ export default function MultiChatWorkspacePanel({
   const [starredProjects, setStarredProjects] = useState<Set<string>>(loadStarredProjects);
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>(readProjectSortOrder);
   const [gridColumns, setGridColumns] = useState<MultiChatGridColumns>(readGridColumnsPreference);
+  const [languageFilter, setLanguageFilter] = useState<string | null>(null);
   const [draggedProjectName, setDraggedProjectName] = useState<string | null>(null);
+  const [gitSummaryByProject, setGitSummaryByProject] = useState<Record<string, ProjectGitHeaderSummary>>({});
   const projectTileRefs = useRef<Record<string, HTMLElement | null>>({});
   const [hasLoadedServerPreferences, setHasLoadedServerPreferences] = useState(false);
 
@@ -788,9 +828,166 @@ export default function MultiChatWorkspacePanel({
     () => sortedProjects.filter((project) => !selectedProjectNameSet.has(project.name)),
     [sortedProjects, selectedProjectNameSet],
   );
+  const selectedProjectNamesForGitKey = useMemo(
+    () => selectedProjects.map((project) => project.name).join(MULTI_CHAT_GIT_PROJECT_KEY_SEPARATOR),
+    [selectedProjects],
+  );
 
-  const gridClass = getGridClassByPreference(gridColumns) || getGridClass(selectedProjects.length);
+  const LANGUAGE_FILTER_KEYS = ['python', 'php', 'typescript', 'bash', 'javascript'] as const;
+
+  const visibleProjects = useMemo(
+    () =>
+      languageFilter
+        ? selectedProjects.filter((p) => (p.primaryLanguage || '').toLowerCase() === languageFilter)
+        : selectedProjects,
+    [selectedProjects, languageFilter],
+  );
+
+  const projectLanguages = useMemo(
+    () => new Set(selectedProjects.map((p) => (p.primaryLanguage || '').toLowerCase()).filter(Boolean)),
+    [selectedProjects],
+  );
+
+  const gridClass = getGridClassByPreference(gridColumns) || getGridClass(visibleProjects.length);
   const tileHeightClass = getTileHeightClass(gridColumns);
+
+  const fetchProjectGitSummary = useCallback(async (projectName: string, signal?: AbortSignal) => {
+    setGitSummaryByProject((previous) => {
+      if (previous[projectName]) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        [projectName]: {
+          isLoading: true,
+          branch: null,
+          changedCount: 0,
+          insertions: 0,
+          deletions: 0,
+          aheadCount: 0,
+          behindCount: 0,
+          hasRemote: false,
+          hasUpstream: false,
+          error: null,
+        },
+      };
+    });
+
+    try {
+      const [statusResponse, remoteResponse] = await Promise.all([
+        authenticatedFetch(`/api/git/status?project=${encodeURIComponent(projectName)}`, { signal }),
+        authenticatedFetch(`/api/git/remote-status?project=${encodeURIComponent(projectName)}`, { signal }),
+      ]);
+
+      const statusPayload = (await statusResponse.json()) as GitStatusSummaryResponse;
+      const remotePayload = (await remoteResponse.json()) as GitRemoteSummaryResponse;
+
+      if (signal?.aborted) {
+        return;
+      }
+
+      const changedCount =
+        (Array.isArray(statusPayload.modified) ? statusPayload.modified.length : 0) +
+        (Array.isArray(statusPayload.added) ? statusPayload.added.length : 0) +
+        (Array.isArray(statusPayload.deleted) ? statusPayload.deleted.length : 0) +
+        (Array.isArray(statusPayload.untracked) ? statusPayload.untracked.length : 0);
+
+      const statusError = typeof statusPayload.error === 'string' ? statusPayload.error : null;
+      const remoteError = typeof remotePayload.error === 'string' ? remotePayload.error : null;
+
+      setGitSummaryByProject((previous) => ({
+        ...previous,
+        [projectName]: {
+          isLoading: false,
+          branch: typeof statusPayload.branch === 'string' ? statusPayload.branch : null,
+          changedCount,
+          insertions: typeof statusPayload.insertions === 'number' ? statusPayload.insertions : 0,
+          deletions: typeof statusPayload.deletions === 'number' ? statusPayload.deletions : 0,
+          aheadCount: typeof remotePayload.ahead === 'number' ? remotePayload.ahead : 0,
+          behindCount: typeof remotePayload.behind === 'number' ? remotePayload.behind : 0,
+          hasRemote: Boolean(remotePayload.hasRemote),
+          hasUpstream: Boolean(remotePayload.hasUpstream),
+          error: statusError || remoteError,
+        },
+      }));
+    } catch (error) {
+      if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+        return;
+      }
+
+      setGitSummaryByProject((previous) => ({
+        ...previous,
+        [projectName]: {
+          isLoading: false,
+          branch: null,
+          changedCount: 0,
+          insertions: 0,
+          deletions: 0,
+          aheadCount: 0,
+          behindCount: 0,
+          hasRemote: false,
+          hasUpstream: false,
+          error: 'Unable to load git status',
+        },
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    const selectedNames = selectedProjectNamesForGitKey
+      ? selectedProjectNamesForGitKey.split(MULTI_CHAT_GIT_PROJECT_KEY_SEPARATOR)
+      : [];
+
+    if (selectedNames.length === 0) {
+      setGitSummaryByProject({});
+      return;
+    }
+
+    let isCancelled = false;
+    let currentController: AbortController | null = null;
+
+    const refreshAllSummaries = async () => {
+      currentController?.abort();
+      const controller = new AbortController();
+      currentController = controller;
+
+      await Promise.all(
+        selectedNames.map((projectName) => fetchProjectGitSummary(projectName, controller.signal)),
+      );
+
+      if (isCancelled) {
+        return;
+      }
+
+      setGitSummaryByProject((previous) => {
+        const selectedSet = new Set(selectedNames);
+        let changed = false;
+        const next: Record<string, ProjectGitHeaderSummary> = {};
+
+        Object.entries(previous).forEach(([projectName, summary]) => {
+          if (selectedSet.has(projectName)) {
+            next[projectName] = summary;
+          } else {
+            changed = true;
+          }
+        });
+
+        return changed ? next : previous;
+      });
+    };
+
+    void refreshAllSummaries();
+    const intervalId = window.setInterval(() => {
+      void refreshAllSummaries();
+    }, 30000);
+
+    return () => {
+      isCancelled = true;
+      currentController?.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [fetchProjectGitSummary, selectedProjectNamesForGitKey]);
 
   const toggleProject = (projectName: string) => {
     setSelectedProjectNames((previous) =>
@@ -870,22 +1067,47 @@ export default function MultiChatWorkspacePanel({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Language filter icons */}
+          <div className="inline-flex items-center gap-0.5 rounded-md border border-border/70 bg-card p-0.5">
+            {LANGUAGE_FILTER_KEYS.map((key) => {
+              const config = LANGUAGE_ICON_BY_NAME[key];
+              const FilterIcon = config?.icon ?? FileCode2;
+              const isActive = languageFilter === key;
+              const hasProjects = projectLanguages.has(key);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setLanguageFilter(isActive ? null : key)}
+                  title={`Filter: ${config?.label ?? key}${!hasProjects ? ' (none)' : ''}`}
+                  disabled={!hasProjects && !isActive}
+                  className={`p-1.5 rounded transition-colors ${
+                    isActive
+                      ? 'bg-primary/15 ring-1 ring-primary/50'
+                      : hasProjects
+                        ? 'hover:bg-muted/50'
+                        : 'opacity-30 cursor-not-allowed'
+                  }`}
+                >
+                  <FilterIcon className={`w-3.5 h-3.5 ${isActive ? 'text-primary' : (config?.colorClass ?? 'text-muted-foreground')}`} />
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Column count picker */}
           <div className="inline-flex items-center rounded-md border border-border/70 bg-card p-0.5">
-            <button
-              type="button"
-              onClick={() => setGridColumns(2)}
-              className={`px-2 py-1 text-xs rounded ${gridColumns === 2 ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-muted/40'}`}
-            >
-              2 cols
-            </button>
-            <button
-              type="button"
-              onClick={() => setGridColumns(3)}
-              className={`px-2 py-1 text-xs rounded ${gridColumns === 3 ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-muted/40'}`}
-            >
-              3 cols
-            </button>
+            {([2, 3, 4] as MultiChatGridColumns[]).map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setGridColumns(n)}
+                className={`px-2 py-1 text-xs rounded ${gridColumns === n ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-muted/40'}`}
+              >
+                {n} cols
+              </button>
+            ))}
           </div>
           <button
             type="button"
@@ -971,12 +1193,22 @@ export default function MultiChatWorkspacePanel({
               </p>
             </div>
           </div>
+        ) : visibleProjects.length === 0 ? (
+          <div className="h-full rounded-lg border border-dashed border-border/70 bg-card/50 flex items-center justify-center px-6 text-center">
+            <div className="space-y-2">
+              <p className="text-sm text-foreground">No projects match the filter.</p>
+              <button type="button" onClick={() => setLanguageFilter(null)} className="text-xs text-primary hover:underline">
+                Clear filter
+              </button>
+            </div>
+          </div>
         ) : (
           <div className={`grid ${gridClass} gap-3 pt-4`}>
-            {selectedProjects.map((project, projectIndex) => {
+            {visibleProjects.map((project, projectIndex) => {
               const accentStyle = getProjectAccent(project.name);
               const languageIconConfig = getProjectLanguageIcon(project);
               const HeaderLanguageIcon = languageIconConfig.icon;
+              const gitSummary = gitSummaryByProject[project.name];
               const outlineClass = draggedProjectName === project.name
                 ? 'border-primary/70 ring-primary/70'
                 : `${accentStyle.borderClass} ${accentStyle.ringClass}`;
@@ -1027,9 +1259,9 @@ export default function MultiChatWorkspacePanel({
                         <HeaderLanguageIcon className={`h-3.5 w-3.5 ${languageIconConfig.colorClass}`} />
                       </div>
                     </div>
-                    <div className="min-w-0 pl-9 pr-28">
-                      <div className="flex items-center gap-2">
-                        <div className="text-[11px] text-muted-foreground truncate flex-1">
+                    <div className="min-w-0 pl-9 pr-52">
+                      <div className="inline-flex items-center gap-1.5 max-w-full overflow-hidden">
+                        <div className="text-[11px] text-muted-foreground truncate max-w-[55%]">
                           {project.fullPath}
                         </div>
                         {(project.url || project.configuredUrl) && (
@@ -1037,7 +1269,7 @@ export default function MultiChatWorkspacePanel({
                             href={String(project.url || project.configuredUrl)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-[10px] text-primary/70 hover:text-primary truncate leading-tight max-w-[42%]"
+                            className="shrink-0 text-[10px] text-primary/70 hover:text-primary leading-tight"
                             title={String(project.url || project.configuredUrl)}
                             onClick={(e) => e.stopPropagation()}
                           >
@@ -1047,6 +1279,55 @@ export default function MultiChatWorkspacePanel({
                       </div>
                     </div>
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <div className="mr-1 inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/80 px-1.5 py-1 text-[10px] leading-none text-muted-foreground">
+                        {gitSummary?.isLoading ? (
+                          <span className="text-[10px] font-medium">Git...</span>
+                        ) : gitSummary?.error ? (
+                          <span className="text-[10px] font-medium" title={gitSummary.error}>
+                            Git N/A
+                          </span>
+                        ) : (
+                          <>
+                            <span
+                              className="inline-flex items-center gap-0.5 max-w-[62px]"
+                              title={gitSummary?.branch ? `Branch: ${gitSummary.branch}` : 'Git branch'}
+                            >
+                              <GitBranch className="h-3 w-3 flex-shrink-0" />
+                              <span className="truncate">{gitSummary?.branch || 'main'}</span>
+                            </span>
+                            <span
+                              className="inline-flex items-center gap-0.5"
+                              title={`${gitSummary?.changedCount || 0} changed file${(gitSummary?.changedCount || 0) === 1 ? '' : 's'}${gitSummary?.insertions ? `, +${gitSummary.insertions}` : ''}${gitSummary?.deletions ? `, -${gitSummary.deletions}` : ''}`}
+                            >
+                              <FileCode2 className="h-3 w-3" />
+                              <span>{gitSummary?.changedCount || 0}</span>
+                              {(gitSummary?.insertions ?? 0) > 0 && (
+                                <span className="text-green-500 dark:text-green-400">+{gitSummary!.insertions}</span>
+                              )}
+                              {(gitSummary?.deletions ?? 0) > 0 && (
+                                <span className="text-red-500 dark:text-red-400">-{gitSummary!.deletions}</span>
+                              )}
+                            </span>
+                            <span
+                              className="inline-flex items-center gap-0.5"
+                              title={`${gitSummary?.aheadCount || 0} commit${(gitSummary?.aheadCount || 0) === 1 ? '' : 's'} to push`}
+                            >
+                              <ArrowUp className="h-3 w-3" />
+                              <span>{gitSummary?.aheadCount || 0}</span>
+                            </span>
+                            <span
+                              className="inline-flex items-center gap-0.5"
+                              title={`${gitSummary?.behindCount || 0} commit${(gitSummary?.behindCount || 0) === 1 ? '' : 's'} to pull`}
+                            >
+                              <ArrowDown className="h-3 w-3" />
+                              <span>{gitSummary?.behindCount || 0}</span>
+                            </span>
+                            {!gitSummary?.hasUpstream && gitSummary?.hasRemote && (
+                              <span title="Remote exists but upstream is not set">U?</span>
+                            )}
+                          </>
+                        )}
+                      </div>
                       <button
                         type="button"
                         draggable
@@ -1075,7 +1356,7 @@ export default function MultiChatWorkspacePanel({
                       <button
                         type="button"
                         onClick={() => moveProjectByStep(project.name, 1)}
-                        disabled={projectIndex === selectedProjects.length - 1}
+                        disabled={projectIndex === visibleProjects.length - 1}
                         className="p-1 rounded-md text-muted-foreground enabled:hover:text-foreground enabled:hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
                         aria-label={`Move ${project.displayName} down`}
                         title={`Move ${project.displayName} down`}
